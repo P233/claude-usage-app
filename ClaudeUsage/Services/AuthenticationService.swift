@@ -94,12 +94,26 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     /// Returns a valid access token, refreshing if needed.
     /// Concurrent callers are coalesced into a single refresh request.
     func getAccessToken() async throws -> String {
-        guard let tokens = cachedOAuthTokens else {
+        guard cachedOAuthTokens != nil else {
             throw ClaudeAPIClient.APIError.notAuthenticated
         }
 
-        if !tokens.isExpired {
+        if let tokens = cachedOAuthTokens, !tokens.isExpired {
             return tokens.accessToken
+        }
+
+        // Token expired — re-read from Keychain (Claude Code may have refreshed)
+        if let credentials = oauthTokenService.loadClaudeCodeCredentials(),
+           let freshTokens = credentials.claudeAiOauth {
+            if !freshTokens.isExpired {
+                cachedOAuthTokens = freshTokens
+                cachedRefreshToken = freshTokens.refreshToken
+                logger.info("OAuth: using fresh token from Keychain")
+                return freshTokens.accessToken
+            }
+            // Update cached tokens with latest from Keychain (refresh token may have rotated)
+            cachedRefreshToken = freshTokens.refreshToken
+            cachedOAuthTokens = freshTokens
         }
 
         // Coalesce concurrent refresh requests
@@ -107,7 +121,8 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
             return try await existing.value
         }
 
-        guard let refreshToken = cachedRefreshToken else {
+        guard let refreshToken = cachedRefreshToken,
+              let currentTokens = cachedOAuthTokens else {
             throw ClaudeAPIClient.APIError.sessionExpired
         }
 
@@ -120,14 +135,17 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
                 return 3600
             }()
 
+            let newRefreshToken = refreshed.refreshToken ?? refreshToken
+
             self.cachedOAuthTokens = OAuthTokens(
                 accessToken: refreshed.accessToken,
-                refreshToken: refreshToken,
+                refreshToken: newRefreshToken,
                 expiresAt: Int64((Date().timeIntervalSince1970 + Double(expiresIn)) * 1000),
-                scopes: tokens.scopes,
-                subscriptionType: tokens.subscriptionType,
-                rateLimitTier: tokens.rateLimitTier
+                scopes: currentTokens.scopes,
+                subscriptionType: currentTokens.subscriptionType,
+                rateLimitTier: currentTokens.rateLimitTier
             )
+            self.cachedRefreshToken = newRefreshToken
 
             logger.info("OAuth: access token refreshed on demand")
             return refreshed.accessToken

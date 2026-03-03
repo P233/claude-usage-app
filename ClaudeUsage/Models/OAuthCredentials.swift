@@ -35,10 +35,12 @@ struct OAuthTokens: Codable {
 /// Response from POST /v1/oauth/token.
 struct OAuthTokenRefreshResponse: Codable {
     let accessToken: String
+    let refreshToken: String? // present when server rotates refresh tokens
     let expiresIn: Int? // seconds until expiry
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
+        case refreshToken = "refresh_token"
         case expiresIn = "expires_in"
     }
 }
