@@ -68,10 +68,7 @@ enum Constants {
 
     enum OAuth {
         static let apiBaseURL = URL(string: "https://api.anthropic.com/api/oauth")!
-        static let tokenEndpoint = URL(string: "https://api.anthropic.com/v1/oauth/token")!
-        static let clientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
         static let claudeCodeKeychainService = "Claude Code-credentials"
-        static let userAgent = "claude-code/2.1.5"
         static let betaHeader = "oauth-2025-04-20"
     }
 }

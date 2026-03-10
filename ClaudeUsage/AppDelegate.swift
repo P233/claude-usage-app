@@ -27,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Set activation policy for menubar-only app
         NSApplication.shared.setActivationPolicy(.accessory)
 
+        // Eagerly detect Claude Code version off the cooperative thread pool
+        // (Process.waitUntilExit() is blocking and must not run on async threads)
+        Task.detached(priority: .utility) { _ = ClaudeCodeVersion.userAgent }
+
         setupStatusItem()
         setupPopover()
         setupEventMonitor()

@@ -10,42 +10,11 @@ protocol OAuthTokenServiceProtocol {
     /// Attempt to load OAuth credentials from Claude Code CLI's Keychain entry.
     /// Returns nil if Claude Code is not installed or has no stored credentials.
     func loadClaudeCodeCredentials() -> ClaudeCodeCredentials?
-
-    /// Refresh the access token using the refresh token.
-    func refreshAccessToken(refreshToken: String) async throws -> OAuthTokenRefreshResponse
 }
 
 // MARK: - Implementation
 
 final class OAuthTokenService: OAuthTokenServiceProtocol {
-
-    // MARK: - Errors
-
-    enum OAuthError: Error, LocalizedError {
-        case refreshFailed(String)
-        case networkError(Error)
-
-        var errorDescription: String? {
-            switch self {
-            case .refreshFailed(let message):
-                return "Token refresh failed: \(message)"
-            case .networkError(let error):
-                return "Network error during token refresh: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    // MARK: - Properties
-
-    private let session: URLSession
-
-    // MARK: - Initialization
-
-    init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = Constants.API.requestTimeout
-        self.session = URLSession(configuration: config)
-    }
 
     // MARK: - Keychain Reading
 
@@ -78,46 +47,6 @@ final class OAuthTokenService: OAuthTokenServiceProtocol {
         } catch {
             logger.error("Failed to decode Claude Code credentials: \(error.localizedDescription)")
             return nil
-        }
-    }
-
-    // MARK: - Token Refresh
-
-    func refreshAccessToken(refreshToken: String) async throws -> OAuthTokenRefreshResponse {
-        var request = URLRequest(url: Constants.OAuth.tokenEndpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue(Constants.OAuth.userAgent, forHTTPHeaderField: "User-Agent")
-
-        var components = URLComponents()
-        components.queryItems = [
-            URLQueryItem(name: "grant_type", value: "refresh_token"),
-            URLQueryItem(name: "refresh_token", value: refreshToken),
-            URLQueryItem(name: "client_id", value: Constants.OAuth.clientId)
-        ]
-        request.httpBody = components.query?.data(using: .utf8)
-
-        do {
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw OAuthError.refreshFailed("Invalid response")
-            }
-
-            guard (200...299).contains(httpResponse.statusCode) else {
-                logger.error("Token refresh failed with HTTP \(httpResponse.statusCode)")
-                throw OAuthError.refreshFailed("HTTP \(httpResponse.statusCode)")
-            }
-
-            let refreshResponse = try JSONDecoder().decode(OAuthTokenRefreshResponse.self, from: data)
-            logger.info("OAuth token refreshed successfully")
-            return refreshResponse
-        } catch let error as OAuthError {
-            throw error
-        } catch let error as DecodingError {
-            throw OAuthError.refreshFailed("Failed to decode response: \(error.localizedDescription)")
-        } catch {
-            throw OAuthError.networkError(error)
         }
     }
 }

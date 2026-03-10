@@ -176,6 +176,7 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
                 guard self.authService.authState.isAuthenticated else { return }
 
                 logger.info("System woke from sleep, refreshing usage")
+                Task.detached(priority: .utility) { ClaudeCodeVersion.refresh() }
                 self.resumeRefreshTimer?.invalidate()
                 self.resumeRefreshTimer = nil
                 await self.refreshNow()
@@ -339,6 +340,8 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
 
         isRefreshing = true
         defer { isRefreshing = false }
+
+        retryCount = 0
 
         let hasActiveTimer = refreshTimer != nil
         let refreshInterval = settings.refreshInterval.seconds

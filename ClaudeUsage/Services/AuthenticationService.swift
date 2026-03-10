@@ -26,15 +26,9 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     private let oauthTokenService: OAuthTokenServiceProtocol
 
     /// In-memory OAuth token cache (read from Claude Code's Keychain, never written back).
-    /// Refreshed tokens are only cached for this app's lifetime. On next launch, we re-read
-    /// from Claude Code's Keychain (which Claude Code itself keeps fresh). This means a
-    /// startup refresh network call is expected if the stored token has expired — acceptable
-    /// tradeoff to avoid writing to another app's Keychain entry.
+    /// This app is a read-only consumer — it never refreshes tokens itself, because doing so
+    /// would invalidate Claude Code's refresh token (server-side rotation) and force re-login.
     private var cachedOAuthTokens: OAuthTokens?
-    private var cachedRefreshToken: String?
-
-    /// Coalesces concurrent token refresh requests to avoid duplicate network calls.
-    private var activeRefreshTask: Task<String, Error>?
 
     init(
         oauthTokenService: OAuthTokenServiceProtocol = OAuthTokenService()
@@ -57,103 +51,41 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
             ? subType
             : SubscriptionType.from(rateLimitTier: oauthTokens.rateLimitTier)
 
-        cachedRefreshToken = oauthTokens.refreshToken
-
+        // Even if the token is currently expired, credentials exist — treat as authenticated.
+        // The auto-refresh cycle will re-read from Keychain when Claude Code refreshes the token.
+        // Setting .notAuthenticated here would stop all timers and require manual reconnection.
+        cachedOAuthTokens = oauthTokens
         if oauthTokens.isExpired {
-            do {
-                let refreshed = try await oauthTokenService.refreshAccessToken(refreshToken: oauthTokens.refreshToken)
-                let expiresIn = refreshed.expiresIn ?? {
-                    logger.warning("OAuth: server omitted expiresIn, defaulting to 3600s")
-                    return 3600
-                }()
-                cachedOAuthTokens = OAuthTokens(
-                    accessToken: refreshed.accessToken,
-                    refreshToken: oauthTokens.refreshToken,
-                    expiresAt: Int64((Date().timeIntervalSince1970 + Double(expiresIn)) * 1000),
-                    scopes: oauthTokens.scopes,
-                    subscriptionType: oauthTokens.subscriptionType,
-                    rateLimitTier: oauthTokens.rateLimitTier
-                )
-                logger.info("OAuth: token refreshed successfully")
-                authState = .authenticated(subscriptionType: subscriptionType)
-            } catch {
-                logger.warning("OAuth: token refresh failed: \(error.localizedDescription)")
-                cachedOAuthTokens = nil
-                cachedRefreshToken = nil
-                authState = .notAuthenticated
-            }
+            logger.info("OAuth: token expired, will retry on next refresh cycle")
         } else {
-            cachedOAuthTokens = oauthTokens
             logger.info("OAuth: authenticated via Claude Code credentials")
-            authState = .authenticated(subscriptionType: subscriptionType)
         }
+        authState = .authenticated(subscriptionType: subscriptionType)
     }
 
     // MARK: - OAuth Access Token
 
-    /// Returns a valid access token, refreshing if needed.
-    /// Concurrent callers are coalesced into a single refresh request.
+    /// Returns a valid access token, re-reading from Keychain if the cached one has expired.
+    /// Never refreshes tokens itself — only Claude Code should do that.
     func getAccessToken() async throws -> String {
-        guard cachedOAuthTokens != nil else {
-            throw ClaudeAPIClient.APIError.notAuthenticated
-        }
-
+        // Return cached token if still valid
         if let tokens = cachedOAuthTokens, !tokens.isExpired {
             return tokens.accessToken
         }
 
-        // Token expired — re-read from Keychain (Claude Code may have refreshed)
+        // Token expired or not cached — re-read from Keychain (Claude Code may have refreshed)
         if let credentials = oauthTokenService.loadClaudeCodeCredentials(),
-           let freshTokens = credentials.claudeAiOauth {
-            if !freshTokens.isExpired {
-                cachedOAuthTokens = freshTokens
-                cachedRefreshToken = freshTokens.refreshToken
-                logger.info("OAuth: using fresh token from Keychain")
-                return freshTokens.accessToken
-            }
-            // Update cached tokens with latest from Keychain (refresh token may have rotated)
-            cachedRefreshToken = freshTokens.refreshToken
+           let freshTokens = credentials.claudeAiOauth,
+           !freshTokens.isExpired {
             cachedOAuthTokens = freshTokens
+            logger.info("OAuth: using fresh token from Keychain")
+            return freshTokens.accessToken
         }
 
-        // Coalesce concurrent refresh requests
-        if let existing = activeRefreshTask {
-            return try await existing.value
-        }
-
-        guard let refreshToken = cachedRefreshToken,
-              let currentTokens = cachedOAuthTokens else {
-            throw ClaudeAPIClient.APIError.sessionExpired
-        }
-
-        let task = Task<String, Error> { [weak self] in
-            guard let self else { throw ClaudeAPIClient.APIError.sessionExpired }
-
-            let refreshed = try await self.oauthTokenService.refreshAccessToken(refreshToken: refreshToken)
-            let expiresIn = refreshed.expiresIn ?? {
-                logger.warning("OAuth: server omitted expiresIn, defaulting to 3600s")
-                return 3600
-            }()
-
-            let newRefreshToken = refreshed.refreshToken ?? refreshToken
-
-            self.cachedOAuthTokens = OAuthTokens(
-                accessToken: refreshed.accessToken,
-                refreshToken: newRefreshToken,
-                expiresAt: Int64((Date().timeIntervalSince1970 + Double(expiresIn)) * 1000),
-                scopes: currentTokens.scopes,
-                subscriptionType: currentTokens.subscriptionType,
-                rateLimitTier: currentTokens.rateLimitTier
-            )
-            self.cachedRefreshToken = newRefreshToken
-
-            logger.info("OAuth: access token refreshed on demand")
-            return refreshed.accessToken
-        }
-
-        activeRefreshTask = task
-        defer { activeRefreshTask = nil }
-        return try await task.value
+        // Keychain token is also expired — wait for Claude Code to refresh it
+        logger.info("OAuth: Keychain token expired, will retry on next cycle")
+        cachedOAuthTokens = nil
+        throw ClaudeAPIClient.APIError.tokenExpired
     }
 
     // MARK: - Session Management
@@ -162,7 +94,6 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     func handleSessionExpired() {
         logger.warning("Session expired, clearing credentials")
         cachedOAuthTokens = nil
-        cachedRefreshToken = nil
         authState = .notAuthenticated
     }
 }

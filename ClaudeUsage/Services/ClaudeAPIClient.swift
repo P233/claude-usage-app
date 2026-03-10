@@ -18,6 +18,7 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
         case invalidResponse
         case httpError(statusCode: Int)
         case sessionExpired
+        case tokenExpired
         case decodingError(Error)
         case networkError(Error)
 
@@ -33,6 +34,8 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
                 return "HTTP error: \(statusCode)"
             case .sessionExpired:
                 return "Session expired. Please log in again."
+            case .tokenExpired:
+                return "Token expired, waiting for refresh..."
             case .decodingError(let error):
                 return "Failed to parse response: \(error.localizedDescription)"
             case .networkError(let error):
@@ -40,6 +43,7 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
             }
         }
 
+        /// Errors that indicate the session is permanently invalid (requires re-login).
         var isAuthError: Bool {
             switch self {
             case .notAuthenticated, .sessionExpired:
@@ -72,7 +76,7 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
         request.httpMethod = method
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(Constants.OAuth.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(ClaudeCodeVersion.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(Constants.OAuth.betaHeader, forHTTPHeaderField: "anthropic-beta")
         return request
     }

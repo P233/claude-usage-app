@@ -11,9 +11,8 @@ A macOS menubar application that displays Claude.ai usage statistics in real-tim
 ### 1. Authentication (OAuth via Claude Code CLI)
 
 - Reads OAuth credentials from Claude Code's macOS Keychain (`"Claude Code-credentials"` service)
-- Read-only: never writes to Claude Code's Keychain entry
-- Token refresh via `POST https://api.anthropic.com/v1/oauth/token` (transparent to user)
-- Refreshed tokens cached in-memory only (re-read from Keychain on next launch)
+- **Read-only consumer**: never writes to Keychain, never refreshes tokens (avoids invalidating Claude Code's refresh token via server-side rotation)
+- Token expired → re-read from Keychain on next refresh cycle (Claude Code handles refresh)
 - Session expiry (401/403): Clear cached auth, show "No Credentials Found" UI with Retry button
 
 ### 2. Usage Data Fetching
@@ -59,7 +58,7 @@ Views (SwiftUI) → ViewModel (AppViewModel) → Services → API
 ```
 UserSettings.shared (singleton)
        ↓
-OAuthTokenService (reads Claude Code Keychain, refreshes tokens)
+OAuthTokenService (reads Claude Code Keychain, read-only)
        ↓
 AuthenticationService (owns OAuthTokenService)
        ↓
@@ -90,8 +89,9 @@ AppViewModel (coordinates all above, exposes @Published properties)
 ### Edge Cases & Error Handling
 
 - **Network Disconnected**: Skip API call, set `lastError`, retry on next timer tick
+- **Token Expired**: Re-read Keychain; if still expired, retry with backoff (transient error, timers keep running)
 - **Session Expired (401/403)**: Set `authState = .notAuthenticated`, show "No Credentials Found" with Retry
-- **API Errors**: Max 3 retries with exponential backoff (30s, 60s, 120s)
+- **API Errors**: Max 3 retries with exponential backoff (30s, 60s, 120s); `retryCount` resets each scheduled cycle
 - **Cache**: `cachedUsageSummary_v2` in UserDefaults, max age 1 hour, cleared on auth state change
 - **System Sleep/Wake**: Stop all timers on sleep (prevents Power Nap API calls/sounds); refresh + restart on wake
 
@@ -129,7 +129,7 @@ ClaudeUsage/
 │   ├── AuthenticationService.swift  # OAuth authentication
 │   ├── ClaudeAPIClient.swift        # API client (OAuth)
 │   ├── NetworkMonitor.swift         # Network connectivity
-│   ├── OAuthTokenService.swift      # Claude Code Keychain reader + token refresh
+│   ├── OAuthTokenService.swift      # Claude Code Keychain reader (read-only)
 │   └── UsageRefreshService.swift    # Polling, reset detection, countdown
 ├── ViewModels/
 │   └── AppViewModel.swift    # UI state coordination
@@ -137,6 +137,7 @@ ClaudeUsage/
 │   ├── MenuBarView.swift     # Main popover view
 │   └── UsageCardView.swift   # Usage card components
 └── Utilities/
+    ├── ClaudeCodeVersion.swift # Dynamic CLI version detection for User-Agent
     └── Constants.swift       # App constants
 
 ClaudeUsageTests/
@@ -152,7 +153,6 @@ All calls go to `api.anthropic.com`:
 - `GET /api/oauth/prepaid/credits` — Prepaid balance & auto-reload settings
 - `GET /api/oauth/overage_spend_limit` — Billing limits & spending details
 - `PUT /api/oauth/overage_spend_limit` — Toggle extra usage enabled/disabled
-- `POST /v1/oauth/token` — Token refresh (client_id + refresh_token)
 
 ## Security Requirements
 
