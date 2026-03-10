@@ -230,7 +230,7 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
     func startAutoRefresh() {
         stopAutoRefresh()
 
-        if let summary = usageSummary, summary.isPrimaryAtLimit {
+        if let summary = usageSummary, summary.isPrimaryAtLimit, summary.primaryResetsAt != nil {
             logger.info("Primary usage at limit, not starting auto-refresh")
             scheduleResumeRefresh(resetsAt: summary.primaryResetsAt)
             startResetCountdown(resetsAt: summary.primaryResetsAt)
@@ -384,10 +384,14 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             saveCache(summary)
 
             if summary.isPrimaryAtLimit {
-                logger.info("Primary usage at limit, pausing auto-refresh")
-                stopAutoRefresh()
-                scheduleResumeRefresh(resetsAt: summary.primaryResetsAt)
-                startResetCountdown(resetsAt: summary.primaryResetsAt)
+                if summary.primaryResetsAt != nil {
+                    logger.info("Primary usage at limit, pausing auto-refresh")
+                    stopAutoRefresh()
+                    scheduleResumeRefresh(resetsAt: summary.primaryResetsAt)
+                    startResetCountdown(resetsAt: summary.primaryResetsAt)
+                } else {
+                    logger.warning("Primary usage at limit but no resetsAt, keeping auto-refresh active")
+                }
             }
 
             // Fetch detailed extra usage data from separate endpoints,
