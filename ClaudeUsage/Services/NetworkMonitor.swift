@@ -1,29 +1,16 @@
 import Foundation
 import Network
-import Combine
 import os.log
 
 private let logger = Logger(subsystem: Constants.App.bundleIdentifier, category: "NetworkMonitor")
 
 /// Monitors network connectivity status using NWPathMonitor.
-/// Publishes connection state changes that can be observed by other components.
 @MainActor
 final class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()
 
     /// Whether the device currently has network connectivity
     @Published private(set) var isConnected: Bool = true
-
-    /// The type of network connection (wifi, cellular, etc.)
-    @Published private(set) var connectionType: ConnectionType = .unknown
-
-    enum ConnectionType: String {
-        case wifi
-        case cellular
-        case wiredEthernet
-        case other
-        case unknown
-    }
 
     private let monitor: NWPathMonitor
     private let monitorQueue = DispatchQueue(label: "com.claudeusage.app.networkmonitor")
@@ -34,7 +21,6 @@ final class NetworkMonitor: ObservableObject {
     }
 
     deinit {
-        // NWPathMonitor.cancel() is thread-safe and can be called from any context
         monitor.cancel()
     }
 
@@ -45,11 +31,10 @@ final class NetworkMonitor: ObservableObject {
 
                 let wasConnected = self.isConnected
                 self.isConnected = path.status == .satisfied
-                self.connectionType = self.getConnectionType(from: path)
 
                 if wasConnected != self.isConnected {
                     if self.isConnected {
-                        logger.info("Network connected via \(self.connectionType.rawValue)")
+                        logger.info("Network connected")
                     } else {
                         logger.warning("Network disconnected")
                     }
@@ -59,19 +44,5 @@ final class NetworkMonitor: ObservableObject {
 
         monitor.start(queue: monitorQueue)
         logger.debug("Network monitoring started")
-    }
-
-    private func getConnectionType(from path: NWPath) -> ConnectionType {
-        if path.usesInterfaceType(.wifi) {
-            return .wifi
-        } else if path.usesInterfaceType(.cellular) {
-            return .cellular
-        } else if path.usesInterfaceType(.wiredEthernet) {
-            return .wiredEthernet
-        } else if path.status == .satisfied {
-            return .other
-        } else {
-            return .unknown
-        }
     }
 }

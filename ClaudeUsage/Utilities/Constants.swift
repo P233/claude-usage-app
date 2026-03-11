@@ -47,19 +47,6 @@ enum Constants {
         })
     }
 
-    /// Commonly used font sizes
-    enum Fonts {
-        static let title: CGFloat = 14
-        static let body: CGFloat = 12
-        static let caption: CGFloat = 11
-        static let footnote: CGFloat = 10
-        static let micro: CGFloat = 9
-        static let statusBarPrimary: CGFloat = 9
-        static let statusBarSecondary: CGFloat = 8
-        static let usagePercentage: CGFloat = 22
-        static let extraUsageAmount: CGFloat = 20
-    }
-
     enum Time {
         static let secondsPerMinute = 60
         static let secondsPerHour = 3600

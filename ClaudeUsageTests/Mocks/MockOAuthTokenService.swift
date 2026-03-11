@@ -13,7 +13,7 @@ final class MockOAuthTokenService: OAuthTokenServiceProtocol {
 
     // MARK: - OAuthTokenServiceProtocol
 
-    func loadClaudeCodeCredentials() -> ClaudeCodeCredentials? {
+    func loadClaudeCodeCredentials() async -> ClaudeCodeCredentials? {
         loadCredentialsCallCount += 1
         return credentials
     }

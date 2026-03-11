@@ -19,9 +19,12 @@ struct OAuthTokens: Codable {
     let subscriptionType: String? // e.g., "max", "pro"
     let rateLimitTier: String? // e.g., "default_claude_max_5x"
 
-    /// Whether the access token has expired (with 60-second safety margin).
+    /// Whether the access token has expired (with 120-second safety margin).
+    /// A larger margin reduces the chance of the token expiring mid-flight
+    /// (between local check and server validation), which would cause a 401
+    /// that triggers the retry-with-fresh-token flow unnecessarily.
     var isExpired: Bool {
-        Date().addingTimeInterval(60) >= expirationDate
+        Date().addingTimeInterval(120) >= expirationDate
     }
 
     /// The Date when the access token expires.

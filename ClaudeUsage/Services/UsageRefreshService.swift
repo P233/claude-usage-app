@@ -271,32 +271,22 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
         resumeRefreshTimer = nil
     }
 
-    /// Starts a 60-second countdown timer targeting the reset time, aligned to system clock
-    /// minute boundaries.
+    /// Starts a 60-second countdown timer targeting the reset time.
     private func startResetCountdown(resetsAt: Date?) {
         guard let resetsAt = resetsAt else { return }
 
         countdownTimer?.invalidate()
         countdownTimer = nil
         countdownTask?.cancel()
+        countdownTask = nil
 
         nextRefreshDate = resetsAt
         updateCountdown()
 
-        // Align first tick to next minute boundary, then switch to 60s repeating timer
-        let secondsIntoMinute = Calendar.current.component(.second, from: Date())
-        let delayToNextMinute = secondsIntoMinute == 0 ? 0.0 : TimeInterval(60 - secondsIntoMinute)
-
-        countdownTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delayToNextMinute * 1_000_000_000))
-            guard !Task.isCancelled, let self = self, self.nextRefreshDate != nil else { return }
-            self.updateCountdown()
-
-            self.countdownTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self = self, self.nextRefreshDate != nil else { return }
-                    self.updateCountdown()
-                }
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.nextRefreshDate != nil else { return }
+                self.updateCountdown()
             }
         }
     }
@@ -404,7 +394,12 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             lastError = error.localizedDescription
             logger.error("API Error: \(error.localizedDescription)")
 
-            if error.shouldSkipRetry {
+            if case .tokenExpired = error {
+                // Token expired is transient — Claude Code will refresh it soon.
+                // Schedule a short retry instead of waiting for the full refresh interval.
+                retryCount = 0
+                await handleTokenExpiredRetry()
+            } else if error.shouldSkipRetry {
                 retryCount = 0
             } else {
                 await handleRetry()
@@ -437,6 +432,20 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             logger.debug("Task cancelled after sleep, aborting retry")
             return
         }
+
+        await performRefresh()
+    }
+
+    /// Short retry for token expiry — Claude Code may refresh the token within seconds.
+    /// Retries once after a short delay instead of waiting for the full refresh interval.
+    private func handleTokenExpiredRetry() async {
+        let delay: TimeInterval = 30
+
+        logger.info("Token expired, retrying in \(Int(delay))s (Claude Code may refresh it)")
+
+        guard !Task.isCancelled else { return }
+        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        guard !Task.isCancelled else { return }
 
         await performRefresh()
     }
@@ -507,14 +516,10 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
         // Fall back to inline extra_usage from OAuth usage response
         guard let inline = inlineExtraUsage else { return }
         let fallbackSpendLimit = OverageSpendLimit(
-            organizationUuid: "",
             isEnabled: inline.isEnabled,
             monthlyCreditLimit: inline.monthlyLimit ?? 0,
             currency: "usd",
-            usedCredits: inline.usedCredits ?? 0,
-            outOfCredits: inline.utilization.map { $0 >= 100 } ?? false,
-            createdAt: "",
-            updatedAt: ""
+            usedCredits: inline.usedCredits ?? 0
         )
         self.extraUsage = ExtraUsageSummary(credits: nil, spendLimit: fallbackSpendLimit)
     }

@@ -67,12 +67,6 @@ struct UsageCardView: View {
                 .frame(height: 6)
             }
 
-            // Show parse error if any
-            if let error = item.parseError {
-                Text(error)
-                    .font(.system(size: 10))
-                    .foregroundColor(.orange)
-            }
         }
         .padding(10)
         .background(Constants.Colors.cardBackground)

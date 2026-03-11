@@ -449,10 +449,22 @@ struct MenuBarView: View {
             Text("No Credentials Found")
                 .font(.system(size: 13, weight: .medium))
 
-            Text("Claude Code CLI may not be logged in.\nRun `claude` to authenticate.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            VStack(spacing: 4) {
+                Text("Please ensure Claude Code CLI is installed")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text("and logged in. Run in Terminal:")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text("claude login")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Constants.Colors.cardBackground)
+                    .cornerRadius(4)
+            }
+            .multilineTextAlignment(.center)
 
             Button {
                 Task { await viewModel.reconnect() }

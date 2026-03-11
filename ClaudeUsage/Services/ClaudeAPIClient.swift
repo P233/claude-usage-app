@@ -85,57 +85,65 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
 
     // MARK: - Response Handling
 
-    private func handleResponse(_ response: URLResponse) async throws {
+    private func validateResponse(_ response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
 
-        // Handle 401/403 - session expired
-        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-            logger.warning("Session expired (HTTP \(httpResponse.statusCode))")
-            await MainActor.run {
-                authService.handleSessionExpired()
-            }
+        let statusCode = httpResponse.statusCode
+
+        if statusCode == 401 || statusCode == 403 {
             throw APIError.sessionExpired
         }
 
-        guard (200...299).contains(httpResponse.statusCode) else {
-            logger.error("HTTP error: \(httpResponse.statusCode)")
-            throw APIError.httpError(statusCode: httpResponse.statusCode)
+        guard (200...299).contains(statusCode) else {
+            logger.error("HTTP error: \(statusCode)")
+            throw APIError.httpError(statusCode: statusCode)
         }
     }
 
-    private func performRequest<T: Decodable>(_ request: URLRequest) async throws -> T {
+    /// Core request method: sends request, handles 401 retry with fresh token, maps errors.
+    private func performDataRequest(_ request: URLRequest) async throws -> Data {
         logger.debug("Request: \(request.httpMethod ?? "GET") \(request.url?.path ?? "")")
 
         do {
             let (data, response) = try await session.data(for: request)
-            try await handleResponse(response)
+            try validateResponse(response)
+            return data
 
-            return try decoder.decode(T.self, from: data)
+        } catch APIError.sessionExpired {
+            return try await retryWithFreshToken(request)
 
         } catch let error as APIError {
             throw error
-        } catch let error as DecodingError {
-            logger.error("Decoding error: \(error.localizedDescription)")
-            throw APIError.decodingError(error)
         } catch {
             logger.error("Network error: \(error.localizedDescription)")
             throw APIError.networkError(error)
         }
     }
 
-    private func performRequestWithoutResponse(_ request: URLRequest) async throws {
-        logger.debug("Request: \(request.httpMethod ?? "GET") \(request.url?.path ?? "")")
+    // MARK: - 401 Retry
+
+    /// Retries a request once with a fresh Keychain token. If still 401/403, marks session expired.
+    private func retryWithFreshToken(_ original: URLRequest) async throws -> Data {
+        logger.info("401 received, retrying with fresh Keychain token")
 
         do {
-            let (_, response) = try await session.data(for: request)
-            try await handleResponse(response)
-        } catch let error as APIError {
-            throw error
-        } catch {
-            logger.error("Network error: \(error.localizedDescription)")
-            throw APIError.networkError(error)
+            let freshToken = try await authService.refreshAndGetAccessToken()
+            var request = original
+            request.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await session.data(for: request)
+            try validateResponse(response)
+            return data
+        } catch APIError.sessionExpired {
+            logger.warning("Retry still returned 401/403, session truly expired")
+            await MainActor.run { authService.handleSessionExpired() }
+            throw APIError.sessionExpired
+        } catch APIError.tokenExpired, APIError.notAuthenticated {
+            logger.warning("Cannot obtain fresh token for retry, marking session expired")
+            await MainActor.run { authService.handleSessionExpired() }
+            throw APIError.sessionExpired
         }
     }
 
@@ -143,23 +151,38 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
 
     func fetchUsage() async throws -> UsageResponse {
         let request = try await makeOAuthRequest(for: "usage")
-        return try await performRequest(request)
+        let data = try await performDataRequest(request)
+        do {
+            return try decoder.decode(UsageResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
 
     func fetchPrepaidCredits() async throws -> PrepaidCredits {
         let request = try await makeOAuthRequest(for: "prepaid/credits")
-        return try await performRequest(request)
+        let data = try await performDataRequest(request)
+        do {
+            return try decoder.decode(PrepaidCredits.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
 
     func fetchOverageSpendLimit() async throws -> OverageSpendLimit {
         let request = try await makeOAuthRequest(for: "overage_spend_limit")
-        return try await performRequest(request)
+        let data = try await performDataRequest(request)
+        do {
+            return try decoder.decode(OverageSpendLimit.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
     }
 
     func updateExtraUsage(enabled: Bool) async throws {
         var request = try await makeOAuthRequest(for: "overage_spend_limit", method: "PUT")
         request.httpBody = try JSONEncoder().encode(UpdateOverageSpendLimitRequest(isEnabled: enabled))
-        try await performRequestWithoutResponse(request)
+        _ = try await performDataRequest(request)
         logger.info("Extra usage updated: \(enabled)")
     }
 }

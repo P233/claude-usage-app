@@ -213,14 +213,12 @@ struct UsageItem: Identifiable {
     let key: String
     let utilization: Int
     let resetsAt: Date?
-    let parseError: String?
 
-    init(key: String, utilization: Int, resetsAt: Date?, parseError: String? = nil) {
+    init(key: String, utilization: Int, resetsAt: Date?) {
         self.id = key
         self.key = key
         self.utilization = utilization
         self.resetsAt = resetsAt
-        self.parseError = parseError
     }
 
     /// Display title for the usage item
@@ -484,21 +482,43 @@ struct AutoReloadSettings: Codable {
 }
 
 struct OverageSpendLimit: Codable {
-    let organizationUuid: String
     let isEnabled: Bool
     let monthlyCreditLimit: Int
     let currency: String
     let usedCredits: Int
-    let outOfCredits: Bool
-    let createdAt: String
-    let updatedAt: String
+
+    // Present in detailed API response, absent in inline fallback
+    let organizationUuid: String?
+    let outOfCredits: Bool?
+    let createdAt: String?
+    let updatedAt: String?
+
+    init(
+        isEnabled: Bool,
+        monthlyCreditLimit: Int,
+        currency: String,
+        usedCredits: Int,
+        organizationUuid: String? = nil,
+        outOfCredits: Bool? = nil,
+        createdAt: String? = nil,
+        updatedAt: String? = nil
+    ) {
+        self.isEnabled = isEnabled
+        self.monthlyCreditLimit = monthlyCreditLimit
+        self.currency = currency
+        self.usedCredits = usedCredits
+        self.organizationUuid = organizationUuid
+        self.outOfCredits = outOfCredits
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 
     enum CodingKeys: String, CodingKey {
-        case organizationUuid = "organization_uuid"
         case isEnabled = "is_enabled"
         case monthlyCreditLimit = "monthly_credit_limit"
         case currency
         case usedCredits = "used_credits"
+        case organizationUuid = "organization_uuid"
         case outOfCredits = "out_of_credits"
         case createdAt = "created_at"
         case updatedAt = "updated_at"

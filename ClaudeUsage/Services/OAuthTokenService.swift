@@ -8,12 +8,14 @@ private let logger = Logger(subsystem: Constants.App.bundleIdentifier, category:
 protocol OAuthTokenServiceProtocol {
     /// Attempt to load OAuth credentials from Claude Code CLI's Keychain entry.
     /// Returns nil if Claude Code is not installed or has no stored credentials.
-    func loadClaudeCodeCredentials() -> ClaudeCodeCredentials?
+    func loadClaudeCodeCredentials() async -> ClaudeCodeCredentials?
 }
 
 // MARK: - Implementation
 
 final class OAuthTokenService: OAuthTokenServiceProtocol {
+
+    private static let processQueue = DispatchQueue(label: "com.claudeusage.app.keychain")
 
     // MARK: - Keychain Reading
 
@@ -23,7 +25,19 @@ final class OAuthTokenService: OAuthTokenServiceProtocol {
     /// uses the legacy Keychain API which does not enforce per-app ACL checks. This avoids
     /// the recurring "wants to access your keychain" dialog that appears when Claude Code
     /// recreates the Keychain entry during token refresh (resetting the ACL).
-    func loadClaudeCodeCredentials() -> ClaudeCodeCredentials? {
+    ///
+    /// Runs the subprocess on a dedicated dispatch queue to avoid blocking Swift's
+    /// cooperative thread pool.
+    func loadClaudeCodeCredentials() async -> ClaudeCodeCredentials? {
+        await withCheckedContinuation { continuation in
+            Self.processQueue.async {
+                let result = Self.runSecurityCommand()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    private static func runSecurityCommand() -> ClaudeCodeCredentials? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = [

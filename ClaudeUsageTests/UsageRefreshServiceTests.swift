@@ -618,6 +618,124 @@ final class UsageRefreshServiceTests {
     }
 }
 
+// MARK: - UsageResponse Decoding Tests
+
+final class UsageResponseDecodingTests {
+
+    func testDecodes_SinglePeriod() {
+        TestRunner.shared.startTest("Decodes single usage period")
+
+        let json = """
+        {"five_hour": {"utilization": 42, "resets_at": "2025-06-01T12:00:00Z"}}
+        """.data(using: .utf8)!
+
+        guard let response = try? JSONDecoder().decode(UsageResponse.self, from: json) else {
+            TestRunner.shared.fail("Failed to decode")
+            return
+        }
+
+        assertEqual(response.items.count, 1, "Should have 1 item")
+        assertEqual(response.items["five_hour"]?.utilization, 42, "Utilization should be 42")
+        assertEqual(response.items["five_hour"]?.resetsAt, "2025-06-01T12:00:00Z", "Should preserve resetsAt")
+        assertNil(response.extraUsage, "Should have no extra usage")
+    }
+
+    func testDecodes_MultiplePeriods() {
+        TestRunner.shared.startTest("Decodes multiple usage periods")
+
+        let json = """
+        {
+            "five_hour": {"utilization": 80, "resets_at": null},
+            "seven_day": {"utilization": 30, "resets_at": "2025-06-07T00:00:00Z"},
+            "seven_day_opus": {"utilization": 10, "resets_at": "2025-06-07T00:00:00Z"}
+        }
+        """.data(using: .utf8)!
+
+        guard let response = try? JSONDecoder().decode(UsageResponse.self, from: json) else {
+            TestRunner.shared.fail("Failed to decode")
+            return
+        }
+
+        assertEqual(response.items.count, 3, "Should have 3 items")
+        assertNil(response.items["five_hour"]?.resetsAt, "five_hour resetsAt should be nil")
+    }
+
+    func testOrderedKeys_Priority() {
+        TestRunner.shared.startTest("orderedKeys follows priority: five_hour → seven_day → variants → others")
+
+        let json = """
+        {
+            "seven_day_opus": {"utilization": 10, "resets_at": null},
+            "custom_period": {"utilization": 5, "resets_at": null},
+            "five_hour": {"utilization": 80, "resets_at": null},
+            "seven_day": {"utilization": 30, "resets_at": null}
+        }
+        """.data(using: .utf8)!
+
+        guard let response = try? JSONDecoder().decode(UsageResponse.self, from: json) else {
+            TestRunner.shared.fail("Failed to decode")
+            return
+        }
+
+        let keys = response.orderedKeys
+        assertEqual(keys[0], "five_hour", "First key should be five_hour")
+        assertEqual(keys[1], "seven_day", "Second key should be seven_day")
+        assertEqual(keys[2], "seven_day_opus", "Third key should be seven_day_opus")
+        assertEqual(keys[3], "custom_period", "Fourth key should be custom_period")
+    }
+
+    func testDecodes_WithExtraUsage() {
+        TestRunner.shared.startTest("Decodes extra_usage inline data")
+
+        let json = """
+        {
+            "five_hour": {"utilization": 50, "resets_at": null},
+            "extra_usage": {"is_enabled": true, "monthly_limit": 5000, "used_credits": 1200, "utilization": 24.0}
+        }
+        """.data(using: .utf8)!
+
+        guard let response = try? JSONDecoder().decode(UsageResponse.self, from: json) else {
+            TestRunner.shared.fail("Failed to decode")
+            return
+        }
+
+        assertEqual(response.items.count, 1, "extra_usage should not appear in items")
+        assertNotNil(response.extraUsage, "Should have extra usage")
+        assertTrue(response.extraUsage?.isEnabled == true, "Extra usage should be enabled")
+        assertEqual(response.extraUsage?.monthlyLimit, 5000, "Monthly limit should be 5000")
+        assertEqual(response.extraUsage?.usedCredits, 1200, "Used credits should be 1200")
+    }
+
+    func testDecodes_IgnoresUnknownFields() {
+        TestRunner.shared.startTest("Ignores fields that don't match UsagePeriodResponse")
+
+        let json = """
+        {
+            "five_hour": {"utilization": 50, "resets_at": null},
+            "unknown_field": "some string value"
+        }
+        """.data(using: .utf8)!
+
+        guard let response = try? JSONDecoder().decode(UsageResponse.self, from: json) else {
+            TestRunner.shared.fail("Failed to decode")
+            return
+        }
+
+        assertEqual(response.items.count, 1, "Should only have 1 valid item")
+        assertNotNil(response.items["five_hour"], "five_hour should be present")
+    }
+
+    func runAll() {
+        print("\n📋 Running UsageResponse Decoding Tests\n")
+
+        testDecodes_SinglePeriod()
+        testDecodes_MultiplePeriods()
+        testOrderedKeys_Priority()
+        testDecodes_WithExtraUsage()
+        testDecodes_IgnoresUnknownFields()
+    }
+}
+
 // MARK: - Test Entry Point
 
 @main
@@ -627,8 +745,13 @@ struct TestMain {
 
     static func main() {
         Task { @MainActor in
+            // Run decoding tests first (no async needed)
+            UsageResponseDecodingTests().runAll()
+
+            // Run service tests
             let tests = UsageRefreshServiceTests()
             await tests.runAll()
+
             testSuccess = TestRunner.shared.printSummary()
             testsComplete = true
         }

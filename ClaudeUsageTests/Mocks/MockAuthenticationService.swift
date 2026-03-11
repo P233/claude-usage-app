@@ -26,6 +26,10 @@ final class MockAuthenticationService: ObservableObject, AuthenticationServicePr
         return mockAccessToken
     }
 
+    func refreshAndGetAccessToken() async throws -> String {
+        return mockAccessToken
+    }
+
     func handleSessionExpired() {
         authState = .notAuthenticated
     }

@@ -5,19 +5,30 @@ private let logger = Logger(subsystem: Constants.App.bundleIdentifier, category:
 
 /// Detects and caches the locally installed Claude Code CLI version for User-Agent headers.
 /// Call `refresh()` after system wake to pick up updates installed during sleep.
+///
+/// Thread-safe: `userAgent` is read from API request threads and written from
+/// `Task.detached` on wake. Access is synchronized via `OSAllocatedUnfairLock`.
 enum ClaudeCodeVersion {
 
     private static let fallback = "claude-code"
 
-    /// Current User-Agent string. Lazily detected on first access.
-    private(set) static var userAgent: String = detect()
+    private static let lock = OSAllocatedUnfairLock(initialState: detect())
+
+    /// Current User-Agent string. Lazily detected on first access, thread-safe.
+    static var userAgent: String {
+        lock.withLock { $0 }
+    }
 
     /// Re-detect the CLI version. Called on system wake.
     static func refresh() {
         let newValue = detect()
-        if newValue != userAgent {
-            logger.info("Claude Code version changed: \(userAgent) → \(newValue)")
-            userAgent = newValue
+        let oldValue = lock.withLock { current -> String in
+            let old = current
+            current = newValue
+            return old
+        }
+        if oldValue != newValue {
+            logger.info("Claude Code version changed: \(oldValue) → \(newValue)")
         }
     }
 
