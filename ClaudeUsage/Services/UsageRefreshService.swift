@@ -404,7 +404,7 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             lastError = error.localizedDescription
             logger.error("API Error: \(error.localizedDescription)")
 
-            if error.isAuthError {
+            if error.shouldSkipRetry {
                 retryCount = 0
             } else {
                 await handleRetry()

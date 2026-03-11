@@ -25,37 +25,41 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
 
     private let oauthTokenService: OAuthTokenServiceProtocol
 
-    /// In-memory OAuth token cache (read from Claude Code's Keychain, never written back).
-    /// This app is a read-only consumer — it never refreshes tokens itself, because doing so
-    /// would invalidate Claude Code's refresh token (server-side rotation) and force re-login.
-    private var cachedOAuthTokens: OAuthTokens?
-
     init(
         oauthTokenService: OAuthTokenServiceProtocol = OAuthTokenService()
     ) {
         self.oauthTokenService = oauthTokenService
     }
 
+    // MARK: - Keychain Reading
+
+    /// Reads OAuth tokens from Claude Code's Keychain entry.
+    /// Returns nil if Claude Code is not installed or has no stored credentials.
+    private func readTokensFromKeychain() -> OAuthTokens? {
+        guard let credentials = oauthTokenService.loadClaudeCodeCredentials(),
+              let tokens = credentials.claudeAiOauth else {
+            return nil
+        }
+        return tokens
+    }
+
     // MARK: - Credential Check
 
     func checkStoredCredentials() async {
-        guard let credentials = oauthTokenService.loadClaudeCodeCredentials(),
-              let oauthTokens = credentials.claudeAiOauth else {
+        guard let tokens = readTokensFromKeychain() else {
             logger.info("No OAuth credentials found from Claude Code")
             authState = .notAuthenticated
             return
         }
 
-        let subType = SubscriptionType.from(oauthSubscriptionType: oauthTokens.subscriptionType)
+        let subType = SubscriptionType.from(oauthSubscriptionType: tokens.subscriptionType)
         let subscriptionType = subType.rawValue != nil
             ? subType
-            : SubscriptionType.from(rateLimitTier: oauthTokens.rateLimitTier)
+            : SubscriptionType.from(rateLimitTier: tokens.rateLimitTier)
 
         // Even if the token is currently expired, credentials exist — treat as authenticated.
         // The auto-refresh cycle will re-read from Keychain when Claude Code refreshes the token.
-        // Setting .notAuthenticated here would stop all timers and require manual reconnection.
-        cachedOAuthTokens = oauthTokens
-        if oauthTokens.isExpired {
+        if tokens.isExpired {
             logger.info("OAuth: token expired, will retry on next refresh cycle")
         } else {
             logger.info("OAuth: authenticated via Claude Code credentials")
@@ -65,27 +69,19 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
 
     // MARK: - OAuth Access Token
 
-    /// Returns a valid access token, re-reading from Keychain if the cached one has expired.
-    /// Never refreshes tokens itself — only Claude Code should do that.
+    /// Returns a valid access token by reading directly from Keychain.
+    /// This app is a read-only consumer — it never refreshes tokens itself.
     func getAccessToken() async throws -> String {
-        // Return cached token if still valid
-        if let tokens = cachedOAuthTokens, !tokens.isExpired {
-            return tokens.accessToken
+        guard let tokens = readTokensFromKeychain() else {
+            throw ClaudeAPIClient.APIError.notAuthenticated
         }
 
-        // Token expired or not cached — re-read from Keychain (Claude Code may have refreshed)
-        if let credentials = oauthTokenService.loadClaudeCodeCredentials(),
-           let freshTokens = credentials.claudeAiOauth,
-           !freshTokens.isExpired {
-            cachedOAuthTokens = freshTokens
-            logger.info("OAuth: using fresh token from Keychain")
-            return freshTokens.accessToken
+        guard !tokens.isExpired else {
+            logger.info("OAuth: Keychain token expired, will retry on next cycle")
+            throw ClaudeAPIClient.APIError.tokenExpired
         }
 
-        // Keychain token is also expired — wait for Claude Code to refresh it
-        logger.info("OAuth: Keychain token expired, will retry on next cycle")
-        cachedOAuthTokens = nil
-        throw ClaudeAPIClient.APIError.tokenExpired
+        return tokens.accessToken
     }
 
     // MARK: - Session Management
@@ -93,7 +89,6 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     /// Called when API returns 401/403 — session expired
     func handleSessionExpired() {
         logger.warning("Session expired, clearing credentials")
-        cachedOAuthTokens = nil
         authState = .notAuthenticated
     }
 }

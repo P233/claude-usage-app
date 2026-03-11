@@ -43,10 +43,12 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
             }
         }
 
-        /// Errors that indicate the session is permanently invalid (requires re-login).
-        var isAuthError: Bool {
+        /// Errors that should NOT be retried with exponential backoff.
+        /// - Auth errors: session permanently invalid, requires re-login
+        /// - Token expired: transient, will resolve when Claude Code refreshes; auto-refresh timer handles it
+        var shouldSkipRetry: Bool {
             switch self {
-            case .notAuthenticated, .sessionExpired:
+            case .notAuthenticated, .sessionExpired, .tokenExpired:
                 return true
             default:
                 return false
