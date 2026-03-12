@@ -16,6 +16,7 @@ final class AppViewModel: ObservableObject {
     @Published var isRefreshing = false
     @Published var lastError: String?
     @Published var secondsUntilNextRefresh: Int = 0
+    @Published var activeTaskCount: Int?
 
     // MARK: - Services
 
@@ -23,6 +24,7 @@ final class AppViewModel: ObservableObject {
     let apiClient: ClaudeAPIClientProtocol
     let refreshService: UsageRefreshServiceProtocol
     var settings: UserSettings
+    let activeTasksService = ActiveTasksService()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -102,6 +104,9 @@ final class AppViewModel: ObservableObject {
         refreshService.isRefreshingPublisher.assign(to: &$isRefreshing)
         refreshService.lastErrorPublisher.assign(to: &$lastError)
         refreshService.secondsUntilNextRefreshPublisher.assign(to: &$secondsUntilNextRefresh)
+
+        activeTasksService.$activeTaskCount.assign(to: &$activeTaskCount)
+        activeTasksService.start()
     }
 
     // MARK: - Actions
@@ -113,6 +118,7 @@ final class AppViewModel: ObservableObject {
 
     func refreshUsage() async {
         await refreshService.refreshNow()
+        activeTasksService.checkAndActivate()
     }
 
     func toggleExtraUsage(enabled: Bool) async throws {

@@ -89,23 +89,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateStatusBarContent() {
         guard let button = statusItem?.button else { return }
 
-        let contentView = StatusBarContentView(
-            authState: viewModel.authState,
-            primaryItem: viewModel.usageSummary?.primaryItem,
-            statusColor: viewModel.statusColor,
-            isRefreshing: viewModel.isRefreshing
-        )
-
-        if let hostingView = statusBarHostingView {
-            hostingView.rootView = contentView
-        } else {
-            let hostingView = NSHostingView(rootView: contentView)
+        if statusBarHostingView == nil {
+            let hostingView = NSHostingView(rootView: StatusBarContentView(viewModel: viewModel))
             statusBarHostingView = hostingView
             button.addSubview(hostingView)
         }
 
         guard let hostingView = statusBarHostingView else { return }
 
+        hostingView.invalidateIntrinsicContentSize()
         let fittingSize = hostingView.fittingSize
         let width = max(Constants.UI.statusBarMinWidth, fittingSize.width + Constants.UI.statusBarPadding)
         let height = Constants.UI.statusBarHeight
@@ -142,21 +134,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
 /// SwiftUI view for the menubar status item (supports two lines)
 struct StatusBarContentView: View {
-    let authState: AuthState
-    let primaryItem: UsageItem?
-    let statusColor: Color
-    let isRefreshing: Bool
+    @ObservedObject var viewModel: AppViewModel
 
     /// Default remaining time when resetting (5-hour cycle)
     private static let defaultRemaining = "5h"
+
+    private static let claudeOrange = Color(
+        red: Constants.Colors.claudeOrange.red,
+        green: Constants.Colors.claudeOrange.green,
+        blue: Constants.Colors.claudeOrange.blue
+    )
 
     var body: some View {
         HStack(alignment: .center, spacing: 4) {
             Image(systemName: "brain")
                 .font(.system(size: 13))
 
-            if authState.isAuthenticated {
-                if let primary = primaryItem {
+            if viewModel.authState.isAuthenticated {
+                if let primary = viewModel.usageSummary?.primaryItem {
                     VStack(alignment: .leading, spacing: -3) {
                         HStack(alignment: .center, spacing: 3) {
                             Text("\(primary.utilization)%")
@@ -164,7 +159,7 @@ struct StatusBarContentView: View {
                                 .fixedSize()
 
                             Circle()
-                                .fill(statusColor)
+                                .fill(viewModel.statusColor)
                                 .frame(width: 6, height: 6)
                         }
 
@@ -173,11 +168,25 @@ struct StatusBarContentView: View {
                             .opacity(0.8)
                             .fixedSize()
                     }
-                } else if isRefreshing {
+                } else if viewModel.isRefreshing {
                     ProgressView()
                         .scaleEffect(0.4)
                         .frame(width: 10, height: 10)
                 }
+            }
+
+            if let count = viewModel.activeTaskCount {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(height: 18)
+                    .padding(.horizontal, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Self.claudeOrange)
+                    )
+                    .opacity(count > 0 ? 1.0 : 0.5)
+                    .fixedSize()
             }
         }
         .frame(height: 22)

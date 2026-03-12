@@ -27,6 +27,7 @@ A macOS menubar application that displays Claude.ai usage statistics in real-tim
 
 - **Status Item**: Multi-line text showing primary usage percentage and reset time
 - **Color Coding**: Green (< 80%), Orange (80-99%), Red (≥ 100%)
+- **Active Task Badge**: Orange rounded badge showing running Claude Code task count (requires claude-code-switcher); `StatusBarContentView` uses `@ObservedObject` for reactive updates
 - **Popover Menu**: Header with tier badge, usage cards (full-width primary, 2-column grid for others), refresh countdown/button
 
 ### 4. Reset Time Management
@@ -67,6 +68,8 @@ ClaudeAPIClient (depends on AuthenticationServiceProtocol for tokens)
 UsageRefreshService (depends on APIClient, AuthService, Settings)
        ↓
 AppViewModel (coordinates all above, exposes @Published properties)
+       ↑
+ActiveTasksService (FSEvents on /tmp/cc-status/, reads ~/.claude/ide/*.lock, optional; checkAndActivate() on each refresh; limitation: standalone file sessions may not be counted when IDE locks exist)
 ```
 
 ### AuthState Machine
@@ -130,6 +133,7 @@ ClaudeUsage/
 │   ├── ClaudeAPIClient.swift        # API client (OAuth)
 │   ├── NetworkMonitor.swift         # Network connectivity
 │   ├── OAuthTokenService.swift      # Claude Code Keychain reader (read-only)
+│   ├── ActiveTasksService.swift     # Claude-code-switcher task count (optional)
 │   └── UsageRefreshService.swift    # Polling, reset detection, countdown
 ├── ViewModels/
 │   └── AppViewModel.swift    # UI state coordination

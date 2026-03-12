@@ -27,6 +27,7 @@ A macOS menubar app that displays your Claude.ai usage statistics.
 - Configurable auto-refresh (1, 3, 5, 10 min)
 - Extra Usage section with spending progress and monthly limit
 - Reset sound notification when quota recovers
+- Active task count badge (requires [claude-code-switcher](https://github.com/P233/claude-code-switcher))
 
 ## How It Works
 
@@ -54,6 +55,16 @@ Migrated from cookie-based authentication (`claude.ai` WebView login) to OAuth v
 - Graceful fallback when detailed API endpoints are unavailable
 - Clean disabled state (hides spending data and reset time when extra usage is off)
 - "Manage in Browser" link to claude.ai settings
+
+## Active Task Count (Optional)
+
+The menubar can display an orange badge showing the number of currently running Claude Code tasks. This feature requires [claude-code-switcher](https://github.com/P233/claude-code-switcher) to be installed and configured.
+
+**How it works:** claude-code-switcher writes session status files to `/tmp/cc-status/` via Claude Code lifecycle hooks. This app reads those files to count tasks with `"running"` status, cross-referenced with live IDE lock files for accuracy.
+
+- If claude-code-switcher is **not installed**, the badge is hidden — no setup needed.
+- If installed, the badge shows `0` when no tasks are running, or the active count otherwise.
+- **Limitation**: Only counts tasks running in project directories. Standalone file sessions (Claude Code opened on a single file, not a workspace) may not be detected when IDE lock files are present.
 
 ## Build & Run
 
