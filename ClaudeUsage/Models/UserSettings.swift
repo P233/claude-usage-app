@@ -51,9 +51,9 @@ enum ResetSound: String, CaseIterable, Sendable {
 }
 
 /// User preferences for the app.
-/// Thread-safe through the use of UserDefaults (which is thread-safe)
-/// and @Published for UI updates on main thread.
-final class UserSettings: ObservableObject, @unchecked Sendable {
+/// All mutations go through SwiftUI bindings on the main thread.
+@MainActor
+final class UserSettings: ObservableObject {
     static let shared = UserSettings()
 
     private let defaults = UserDefaults.standard

@@ -119,9 +119,11 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             .sink { [weak self] (state: AuthState) in
                 guard let self = self else { return }
 
-                // Cancel and wait for previous task to complete
+                // Cancel previous task and clear isRefreshing so the new
+                // refreshNow() won't be silently dropped by the guard.
                 self.currentRefreshTask?.cancel()
                 self.currentRefreshTask = nil
+                self.isRefreshing = false
                 self.retryCount = 0  // Reset retry count on auth state change
 
                 if state.isAuthenticated {
@@ -333,12 +335,13 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
 
         retryCount = 0
 
-        let hasActiveTimer = refreshTimer != nil
         let refreshInterval = settings.refreshInterval.seconds
 
         await performRefresh()
 
-        if hasActiveTimer && refreshTimer != nil {
+        // Update next refresh date only if auto-refresh timer is still active
+        // (checked after await — stopAutoRefresh() may have run during the suspension)
+        if refreshTimer != nil {
             nextRefreshDate = Date().addingTimeInterval(refreshInterval)
         }
     }
@@ -397,7 +400,6 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             if case .tokenExpired = error {
                 // Token expired is transient — Claude Code will refresh it soon.
                 // Schedule a short retry instead of waiting for the full refresh interval.
-                retryCount = 0
                 await handleTokenExpiredRetry()
             } else if error.shouldSkipRetry {
                 retryCount = 0
@@ -437,11 +439,17 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
     }
 
     /// Short retry for token expiry — Claude Code may refresh the token within seconds.
-    /// Retries once after a short delay instead of waiting for the full refresh interval.
+    /// Retries up to maxRetries times after a short delay instead of waiting for the full refresh interval.
     private func handleTokenExpiredRetry() async {
+        guard retryCount < maxRetries else {
+            logger.warning("Token expired retry limit reached, waiting for next scheduled refresh")
+            return
+        }
+
+        retryCount += 1
         let delay: TimeInterval = 30
 
-        logger.info("Token expired, retrying in \(Int(delay))s (Claude Code may refresh it)")
+        logger.info("Token expired, retrying in \(Int(delay))s (attempt \(self.retryCount)/\(self.maxRetries))")
 
         guard !Task.isCancelled else { return }
         try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))

@@ -45,13 +45,15 @@ struct SubscriptionType: Equatable, Codable {
     }
 
     /// Legacy migration: infer from old rateLimitTier format
+    /// e.g., "default_claude_max_5x" → extract "claude_max_5x"
     static func from(rateLimitTier: String?) -> SubscriptionType {
         guard let tier = rateLimitTier else {
             return SubscriptionType(rawValue: nil)
         }
         let lowered = tier.lowercased()
-        // Check if "claude_" appears anywhere (e.g., "default_claude_max_5x")
-        let normalized = lowered.contains("claude_") ? lowered : "claude_\(lowered)"
-        return SubscriptionType(rawValue: normalized)
+        if let range = lowered.range(of: "claude_") {
+            return SubscriptionType(rawValue: String(lowered[range.lowerBound...]))
+        }
+        return SubscriptionType(rawValue: "claude_\(lowered)")
     }
 }

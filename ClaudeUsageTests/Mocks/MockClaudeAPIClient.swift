@@ -1,6 +1,7 @@
 import Foundation
 
 /// Mock API client for testing UsageRefreshService
+@MainActor
 final class MockClaudeAPIClient: ClaudeAPIClientProtocol {
 
     // MARK: - Configurable Behavior

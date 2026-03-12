@@ -27,9 +27,11 @@ final class ActiveTasksService: ObservableObject {
     }()
     private let fileManager = FileManager.default
 
-    private var eventStream: FSEventStreamRef?
+    /// nonisolated(unsafe) because deinit is nonisolated and needs to access these
+    /// for cleanup. Only mutated on @MainActor (startEventStream / stopEventStream).
+    nonisolated(unsafe) private var eventStream: FSEventStreamRef?
     /// Retains self while FSEventStream is active (balanced in stopEventStream)
-    private var retainedSelf: Unmanaged<ActiveTasksService>?
+    nonisolated(unsafe) private var retainedSelf: Unmanaged<ActiveTasksService>?
 
     // MARK: - Lifecycle
 
@@ -41,6 +43,17 @@ final class ActiveTasksService: ObservableObject {
 
     func stop() {
         stopEventStream()
+    }
+
+    deinit {
+        // Safety net: ensure FSEvents stream is torn down if stop() was never called.
+        // Inline cleanup because deinit is nonisolated and can't call @MainActor methods.
+        if let stream = eventStream {
+            FSEventStreamStop(stream)
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+        }
+        retainedSelf?.release()
     }
 
     /// Called on each usage refresh cycle to detect late directory appearance.

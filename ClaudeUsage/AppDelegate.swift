@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// Reusable hosting view for status bar content (prevents memory leaks)
     private var statusBarHostingView: NSHostingView<StatusBarContentView>?
 
+    /// Reusable hosting controller for popover content
+    private var popoverHostingController: NSHostingController<AnyView>?
+
     /// Shared view model accessible throughout the app
     let viewModel = AppViewModel()
 
@@ -50,7 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func setupPopover() {
+        let contentView = MenuBarView().environmentObject(viewModel)
+        let hostingController = NSHostingController(rootView: AnyView(contentView))
+        popoverHostingController = hostingController
+
         popover = NSPopover()
+        popover?.contentViewController = hostingController
         popover?.contentSize = NSSize(width: Constants.UI.menuBarWidth, height: 500)
         popover?.behavior = .transient
         popover?.animates = true
@@ -115,8 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if let popover = popover, popover.isShown {
             popover.performClose(nil)
         } else {
-            let contentView = MenuBarView().environmentObject(viewModel)
-            popover?.contentViewController = NSHostingController(rootView: contentView)
             popover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover?.contentViewController?.view.window?.makeKey()
         }

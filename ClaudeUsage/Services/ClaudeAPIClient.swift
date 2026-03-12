@@ -3,6 +3,7 @@ import os.log
 
 private let logger = Logger(subsystem: Constants.App.bundleIdentifier, category: "ClaudeAPIClient")
 
+@MainActor
 protocol ClaudeAPIClientProtocol {
     func fetchUsage() async throws -> UsageResponse
     func fetchPrepaidCredits() async throws -> PrepaidCredits

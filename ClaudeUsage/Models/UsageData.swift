@@ -143,26 +143,19 @@ struct UsageResponse {
     /// 3. seven_day_* variants
     /// 4. others (alphabetically)
     var orderedKeys: [String] {
-        var priorityKeys: [String] = []
-        var sevenDayKeys: [String] = []
-        var otherKeys: [String] = []
-
-        for key in items.keys {
-            if key == "five_hour" {
-                priorityKeys.insert(key, at: 0)
-            } else if key == "seven_day" {
-                priorityKeys.append(key)
-            } else if key.hasPrefix("seven_day_") {
-                sevenDayKeys.append(key)
-            } else {
-                otherKeys.append(key)
+        /// Priority rank for sorting: lower value = higher priority.
+        func priority(_ key: String) -> Int {
+            switch key {
+            case "five_hour": return 0
+            case "seven_day": return 1
+            default: return key.hasPrefix("seven_day_") ? 2 : 3
             }
         }
 
-        sevenDayKeys.sort()
-        otherKeys.sort()
-
-        return priorityKeys + sevenDayKeys + otherKeys
+        return items.keys.sorted { a, b in
+            let pa = priority(a), pb = priority(b)
+            return pa != pb ? pa < pb : a < b
+        }
     }
 }
 
