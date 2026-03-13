@@ -179,6 +179,14 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
 
                 logger.info("System woke from sleep, refreshing usage")
                 Task.detached(priority: .utility) { ClaudeCodeVersion.refresh() }
+
+                // Cancel any in-progress refresh from before sleep
+                // (retry loops may still be awaiting Task.sleep)
+                self.currentRefreshTask?.cancel()
+                self.currentRefreshTask = nil
+                self.isRefreshing = false
+                self.retryCount = 0
+
                 self.resumeRefreshTimer?.invalidate()
                 self.resumeRefreshTimer = nil
                 await self.refreshNow()
@@ -232,10 +240,11 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
     func startAutoRefresh() {
         stopAutoRefresh()
 
-        if let summary = usageSummary, summary.isPrimaryAtLimit, summary.primaryResetsAt != nil {
+        if let summary = usageSummary, summary.isPrimaryAtLimit,
+           let resetsAt = summary.primaryResetsAt, resetsAt.timeIntervalSince(Date()) > 0 {
             logger.info("Primary usage at limit, not starting auto-refresh")
-            scheduleResumeRefresh(resetsAt: summary.primaryResetsAt)
-            startResetCountdown(resetsAt: summary.primaryResetsAt)
+            scheduleResumeRefresh(resetsAt: resetsAt)
+            startResetCountdown(resetsAt: resetsAt)
             return
         }
 
