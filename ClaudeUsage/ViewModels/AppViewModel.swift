@@ -15,6 +15,7 @@ final class AppViewModel: ObservableObject {
     @Published var extraUsage: ExtraUsageSummary?
     @Published var isRefreshing = false
     @Published var lastError: String?
+    @Published var isTokenExpired = false
     @Published var secondsUntilNextRefresh: Int = 0
     @Published var activeTaskCount: Int?
 
@@ -103,6 +104,7 @@ final class AppViewModel: ObservableObject {
         refreshService.extraUsagePublisher.assign(to: &$extraUsage)
         refreshService.isRefreshingPublisher.assign(to: &$isRefreshing)
         refreshService.lastErrorPublisher.assign(to: &$lastError)
+        refreshService.isTokenExpiredPublisher.assign(to: &$isTokenExpired)
         refreshService.secondsUntilNextRefreshPublisher.assign(to: &$secondsUntilNextRefresh)
 
         activeTasksService.$activeTaskCount.assign(to: &$activeTaskCount)

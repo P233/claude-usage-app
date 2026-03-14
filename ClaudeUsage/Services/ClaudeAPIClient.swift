@@ -36,7 +36,7 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
             case .sessionExpired:
                 return "Session expired. Please log in again."
             case .tokenExpired:
-                return "Token expired, waiting for refresh..."
+                return "Token expired — open Claude Code to refresh"
             case .decodingError(let error):
                 return "Failed to parse response: \(error.localizedDescription)"
             case .networkError(let error):
@@ -47,6 +47,11 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
         /// Errors that should NOT be retried with exponential backoff.
         /// - Auth errors: session permanently invalid, requires re-login
         /// - Token expired: transient, will resolve when Claude Code refreshes; auto-refresh timer handles it
+        var isTokenExpired: Bool {
+            if case .tokenExpired = self { return true }
+            return false
+        }
+
         var shouldSkipRetry: Bool {
             switch self {
             case .notAuthenticated, .sessionExpired, .tokenExpired:

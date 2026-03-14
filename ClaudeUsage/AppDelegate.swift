@@ -169,10 +169,22 @@ struct StatusBarContentView: View {
                                 .frame(width: 6, height: 6)
                         }
 
-                        Text(primary.resetTimeRemaining ?? Self.defaultRemaining)
-                            .font(.system(size: 8, weight: .regular, design: .rounded))
-                            .opacity(0.8)
-                            .fixedSize()
+                        if viewModel.isTokenExpired {
+                            Text("Open CC")
+                                .font(.system(size: 8, weight: .medium, design: .rounded))
+                                .foregroundColor(.orange)
+                                .fixedSize()
+                        } else if viewModel.lastError != nil {
+                            Text("Error ⚠")
+                                .font(.system(size: 8, weight: .medium, design: .rounded))
+                                .foregroundColor(.orange)
+                                .fixedSize()
+                        } else {
+                            Text(primary.resetTimeRemaining ?? Self.defaultRemaining)
+                                .font(.system(size: 8, weight: .regular, design: .rounded))
+                                .opacity(0.8)
+                                .fixedSize()
+                        }
                     }
                 } else if viewModel.isRefreshing {
                     ProgressView()

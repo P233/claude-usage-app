@@ -329,7 +329,7 @@ struct UsageItem: Identifiable {
 // MARK: - Reset Time Formatting
 
 private enum ResetTimeFormatter {
-    static let updatingText = "Updating..."
+    static let updatingText = "Refreshing…"
     static let readyText = "Ready"
 
     struct TimeComponents {

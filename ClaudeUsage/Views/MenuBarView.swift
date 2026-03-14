@@ -141,13 +141,7 @@ struct MenuBarView: View {
                 lastUpdatedView
             }
 
-            // Usage cards
-            usageCardsView
-
-            // Extra Usage section
-            extraUsageSectionView
-
-            // Error message
+            // Error message (below header, above cards)
             if let error = viewModel.lastError {
                 HStack(spacing: 4) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -156,9 +150,15 @@ struct MenuBarView: View {
                     Text(error)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
+
+            // Usage cards
+            usageCardsView
+
+            // Extra Usage section
+            extraUsageSectionView
         }
     }
 

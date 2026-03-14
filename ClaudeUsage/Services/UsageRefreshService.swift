@@ -15,6 +15,8 @@ protocol UsageRefreshServiceProtocol: AnyObject {
     var isRefreshingPublisher: Published<Bool>.Publisher { get }
     var lastError: String? { get }
     var lastErrorPublisher: Published<String?>.Publisher { get }
+    var isTokenExpired: Bool { get }
+    var isTokenExpiredPublisher: Published<Bool>.Publisher { get }
     var secondsUntilNextRefresh: Int { get }
     var secondsUntilNextRefreshPublisher: Published<Int>.Publisher { get }
 
@@ -37,6 +39,9 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
 
     @Published private(set) var lastError: String?
     var lastErrorPublisher: Published<String?>.Publisher { $lastError }
+
+    @Published private(set) var isTokenExpired = false
+    var isTokenExpiredPublisher: Published<Bool>.Publisher { $isTokenExpired }
 
     @Published private(set) var secondsUntilNextRefresh: Int = 0
     var secondsUntilNextRefreshPublisher: Published<Int>.Publisher { $secondsUntilNextRefresh }
@@ -356,6 +361,8 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
     }
 
     private func performRefresh() async {
+        isTokenExpired = false
+
         guard authService.authState.isAuthenticated else {
             lastError = "Not authenticated"
             return
@@ -404,6 +411,7 @@ final class UsageRefreshService: ObservableObject, UsageRefreshServiceProtocol {
             logger.info("Usage updated: \(summary.items.count) items, primary=\(primaryUtil)%")
         } catch let error as ClaudeAPIClient.APIError {
             lastError = error.localizedDescription
+            isTokenExpired = error.isTokenExpired
             logger.error("API Error: \(error.localizedDescription)")
 
             if case .tokenExpired = error {
