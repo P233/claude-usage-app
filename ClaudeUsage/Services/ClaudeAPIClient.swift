@@ -9,6 +9,7 @@ protocol ClaudeAPIClientProtocol {
     func fetchPrepaidCredits() async throws -> PrepaidCredits
     func fetchOverageSpendLimit() async throws -> OverageSpendLimit
     func updateExtraUsage(enabled: Bool) async throws
+    func fetchProfile() async throws -> ProfileResponse
 }
 
 final class ClaudeAPIClient: ClaudeAPIClientProtocol {
@@ -186,4 +187,40 @@ final class ClaudeAPIClient: ClaudeAPIClientProtocol {
         _ = try await performDataRequest(request)
         logger.info("Extra usage updated: \(enabled)")
     }
+
+    func fetchProfile() async throws -> ProfileResponse {
+        let request = try await makeOAuthRequest(for: "profile")
+        let data = try await performDataRequest(request)
+        do {
+            return try decoder.decode(ProfileResponse.self, from: data)
+        } catch {
+            throw APIError.decodingError(error)
+        }
+    }
+}
+
+// MARK: - Profile Response
+
+struct ProfileResponse: Codable {
+    let account: ProfileAccount?
+    let organization: ProfileOrganization?
+}
+
+struct ProfileAccount: Codable {
+    let uuid: String?
+    let email: String?
+    let fullName: String?
+    let displayName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case uuid
+        case email
+        case fullName = "full_name"
+        case displayName = "display_name"
+    }
+}
+
+struct ProfileOrganization: Codable {
+    let uuid: String?
+    let name: String?
 }

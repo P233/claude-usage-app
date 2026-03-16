@@ -121,7 +121,24 @@ final class AppViewModel: ObservableObject {
             ? subType
             : SubscriptionType.from(rateLimitTier: tokens.rateLimitTier)
 
-        accountManager.syncFromClaudeCode(credentials: credentials, subscriptionType: subscriptionType)
+        if let account = accountManager.syncFromClaudeCode(credentials: credentials, subscriptionType: subscriptionType) {
+            // Fetch email from profile API if not already set
+            if account.email == nil || account.email?.isEmpty == true {
+                await fetchAndUpdateEmail(for: account.id)
+            }
+        }
+    }
+
+    /// Fetch profile from API and update account email
+    private func fetchAndUpdateEmail(for accountId: String) async {
+        do {
+            let profile = try await apiClient.fetchProfile()
+            if let email = profile.account?.email {
+                accountManager.updateEmail(for: accountId, email: email)
+            }
+        } catch {
+            logger.debug("Failed to fetch profile for email: \(error.localizedDescription)")
+        }
     }
 
     /// Load a stored account's credentials and set override on AuthService

@@ -177,7 +177,14 @@ struct MenuBarView: View {
                     Task { await viewModel.switchAccount(to: account.id) }
                 } label: {
                     HStack {
-                        Text(account.displayName)
+                        if let email = account.email {
+                            Text(email)
+                        } else {
+                            Text(account.label)
+                        }
+                        if let tier = account.subscriptionType.displayName {
+                            Text("(\(tier))")
+                        }
                         if account.id == viewModel.accountManager.activeAccountId {
                             Image(systemName: "checkmark")
                         }
@@ -186,8 +193,12 @@ struct MenuBarView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text(viewModel.accountManager.activeAccount?.displayName ?? "Account")
+                Text(viewModel.accountManager.activeAccount?.shortDisplayName ?? "Account")
                     .font(.system(size: 14, weight: .semibold))
+
+                if let tierName = viewModel.authState.tierDisplayName {
+                    tierBadge(tierName)
+                }
 
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .medium))

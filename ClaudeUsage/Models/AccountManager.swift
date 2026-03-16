@@ -11,9 +11,20 @@ struct AccountInfo: Codable, Identifiable, Equatable {
     let organizationUuid: String
     let subscriptionType: SubscriptionType
     var label: String
+    var email: String?
     let addedAt: Date
 
     var displayName: String {
+        if let email = email, !email.isEmpty { return email }
+        if !label.isEmpty { return label }
+        return subscriptionType.displayName ?? "Account"
+    }
+
+    /// Short display for the dropdown (email prefix or label)
+    var shortDisplayName: String {
+        if let email = email, !email.isEmpty {
+            return email.components(separatedBy: "@").first ?? email
+        }
         if !label.isEmpty { return label }
         return subscriptionType.displayName ?? "Account"
     }
@@ -69,6 +80,7 @@ final class AccountManager: ObservableObject {
                     organizationUuid: orgUuid,
                     subscriptionType: subscriptionType,
                     label: account.label,
+                    email: account.email,
                     addedAt: account.addedAt
                 )
                 accounts[existingIndex] = account
@@ -97,6 +109,7 @@ final class AccountManager: ObservableObject {
             organizationUuid: orgUuid,
             subscriptionType: subscriptionType,
             label: label,
+            email: nil,
             addedAt: Date()
         )
 
@@ -110,6 +123,25 @@ final class AccountManager: ObservableObject {
         saveAccounts()
         logger.info("Added new account: \(label)")
         return account
+    }
+
+    /// Update the email for an account (fetched from profile API)
+    func updateEmail(for accountId: String, email: String) {
+        guard let index = accounts.firstIndex(where: { $0.id == accountId }) else { return }
+        guard accounts[index].email != email else { return }
+
+        var account = accounts[index]
+        account = AccountInfo(
+            id: account.id,
+            organizationUuid: account.organizationUuid,
+            subscriptionType: account.subscriptionType,
+            label: account.label,
+            email: email,
+            addedAt: account.addedAt
+        )
+        accounts[index] = account
+        saveAccounts()
+        logger.info("Updated email for account: \(email)")
     }
 
     func removeAccount(_ id: String) {
