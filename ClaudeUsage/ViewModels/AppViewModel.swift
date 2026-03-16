@@ -96,21 +96,22 @@ final class AppViewModel: ObservableObject {
     private func checkCredentialsOnLaunch() async {
         logger.debug("App launched, checking stored credentials")
 
-        // Always read from Claude Code Keychain first to sync accounts
-        await syncClaudeCodeAccount()
+        // 1. Authenticate via Claude Code Keychain
+        await authService.checkStoredCredentials()
 
-        // If the active account is the Claude Code account (or no accounts), use Keychain directly
+        // 2. If authenticated, sync account info from profile API
+        if authState.isAuthenticated {
+            await syncClaudeCodeAccount()
+        }
+
+        // 3. If active account is a stored (non-Claude-Code) account, switch to it
         if let activeId = accountManager.activeAccountId,
            !accountManager.isClaudeCodeAccount(activeId) {
-            // Active account is a stored (non-Claude-Code) account — load its tokens
             await loadStoredAccount(activeId)
-        } else {
-            // Active account is Claude Code's current account — use Keychain directly
-            await authService.checkStoredCredentials()
         }
     }
 
-    /// Read from Claude Code Keychain and save/update the account in AccountManager
+    /// Read Claude Code Keychain + profile API, then sync to AccountManager
     private func syncClaudeCodeAccount() async {
         let tokenService = OAuthTokenService()
         guard let credentials = await tokenService.loadClaudeCodeCredentials(),
@@ -121,24 +122,28 @@ final class AppViewModel: ObservableObject {
             ? subType
             : SubscriptionType.from(rateLimitTier: tokens.rateLimitTier)
 
-        if let account = accountManager.syncFromClaudeCode(credentials: credentials, subscriptionType: subscriptionType) {
-            // Fetch email from profile API if not already set
-            if account.email == nil || account.email?.isEmpty == true {
-                await fetchAndUpdateEmail(for: account.id)
-            }
-        }
-    }
-
-    /// Fetch profile from API and update account email
-    private func fetchAndUpdateEmail(for accountId: String) async {
+        // Fetch profile to get orgUuid and email
+        var orgUuid: String?
+        var email: String?
         do {
             let profile = try await apiClient.fetchProfile()
-            if let email = profile.account?.email {
-                accountManager.updateEmail(for: accountId, email: email)
-            }
+            orgUuid = profile.organization?.uuid
+            email = profile.account?.email
         } catch {
-            logger.debug("Failed to fetch profile for email: \(error.localizedDescription)")
+            logger.debug("Profile fetch failed: \(error.localizedDescription)")
         }
+
+        guard let orgUuid = orgUuid else {
+            logger.warning("Could not determine organization UUID, skipping account sync")
+            return
+        }
+
+        accountManager.syncFromClaudeCode(
+            credentials: credentials,
+            organizationUuid: orgUuid,
+            subscriptionType: subscriptionType,
+            email: email
+        )
     }
 
     /// Load a stored account's credentials and set override on AuthService
@@ -174,13 +179,9 @@ final class AppViewModel: ObservableObject {
 
     func reconnect() async {
         logger.info("Retrying credential check")
-        // Re-sync from Claude Code and check credentials
-        await syncClaudeCodeAccount()
-        if let activeId = accountManager.activeAccountId,
-           !accountManager.isClaudeCodeAccount(activeId) {
-            await loadStoredAccount(activeId)
-        } else {
-            await authService.checkStoredCredentials()
+        await authService.checkStoredCredentials()
+        if authState.isAuthenticated {
+            await syncClaudeCodeAccount()
         }
     }
 

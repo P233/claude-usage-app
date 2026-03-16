@@ -59,28 +59,31 @@ final class AccountManager: ObservableObject {
 
     // MARK: - Sync from Claude Code
 
-    /// Called when reading from Claude Code's Keychain.
+    /// Called after fetching profile + Keychain credentials.
     /// Saves/updates the account and returns the AccountInfo.
     @discardableResult
     func syncFromClaudeCode(
         credentials: ClaudeCodeCredentials,
-        subscriptionType: SubscriptionType
+        organizationUuid orgUuid: String,
+        subscriptionType: SubscriptionType,
+        email: String? = nil
     ) -> AccountInfo? {
-        guard let orgUuid = credentials.organizationUuid else { return nil }
         claudeCodeOrgUuid = orgUuid
 
         // Check if account already exists
         if let existingIndex = accounts.firstIndex(where: { $0.organizationUuid == orgUuid }) {
             var account = accounts[existingIndex]
 
-            // Update subscription type if changed
-            if account.subscriptionType != subscriptionType {
+            // Update subscription type or email if changed
+            let needsUpdate = account.subscriptionType != subscriptionType
+                || (email != nil && account.email != email)
+            if needsUpdate {
                 account = AccountInfo(
                     id: account.id,
                     organizationUuid: orgUuid,
                     subscriptionType: subscriptionType,
                     label: account.label,
-                    email: account.email,
+                    email: email ?? account.email,
                     addedAt: account.addedAt
                 )
                 accounts[existingIndex] = account
@@ -109,7 +112,7 @@ final class AccountManager: ObservableObject {
             organizationUuid: orgUuid,
             subscriptionType: subscriptionType,
             label: label,
-            email: nil,
+            email: email,
             addedAt: Date()
         )
 
