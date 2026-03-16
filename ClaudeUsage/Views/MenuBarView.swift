@@ -117,13 +117,19 @@ struct MenuBarView: View {
 
     private var authenticatedView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header with account picker and last updated time
+            // Header with account info and last updated time
             HStack(alignment: .firstTextBaseline) {
                 if viewModel.accountManager.accounts.count > 1 {
                     accountPickerView
                 } else {
-                    Text("Claude Usage")
-                        .font(.system(size: 14, weight: .semibold))
+                    if let email = viewModel.accountManager.activeAccount?.email, !email.isEmpty {
+                        Text(email)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                    } else {
+                        Text("Claude Usage")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
 
                     if let tierName = viewModel.authState.tierDisplayName {
                         tierBadge(tierName)
