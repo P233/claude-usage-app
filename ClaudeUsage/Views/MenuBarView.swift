@@ -117,23 +117,17 @@ struct MenuBarView: View {
 
     private var authenticatedView: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header with tier and last updated time
+            // Header with account picker and last updated time
             HStack(alignment: .firstTextBaseline) {
-                Text("Claude Usage")
-                    .font(.system(size: 14, weight: .semibold))
+                if viewModel.accountManager.accounts.count > 1 {
+                    accountPickerView
+                } else {
+                    Text("Claude Usage")
+                        .font(.system(size: 14, weight: .semibold))
 
-                if let tierName = viewModel.authState.tierDisplayName {
-                    Text(tierName)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color(
-                            red: Constants.Colors.claudeOrange.red,
-                            green: Constants.Colors.claudeOrange.green,
-                            blue: Constants.Colors.claudeOrange.blue
-                        ))
-                        .cornerRadius(4)
+                    if let tierName = viewModel.authState.tierDisplayName {
+                        tierBadge(tierName)
+                    }
                 }
 
                 Spacer()
@@ -160,6 +154,48 @@ struct MenuBarView: View {
                 }
             }
         }
+    }
+
+    private func tierBadge(_ tierName: String) -> some View {
+        Text(tierName)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color(
+                red: Constants.Colors.claudeOrange.red,
+                green: Constants.Colors.claudeOrange.green,
+                blue: Constants.Colors.claudeOrange.blue
+            ))
+            .cornerRadius(4)
+    }
+
+    private var accountPickerView: some View {
+        Menu {
+            ForEach(viewModel.accountManager.accounts) { account in
+                Button {
+                    Task { await viewModel.switchAccount(to: account.id) }
+                } label: {
+                    HStack {
+                        Text(account.displayName)
+                        if account.id == viewModel.accountManager.activeAccountId {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(viewModel.accountManager.activeAccount?.displayName ?? "Account")
+                    .font(.system(size: 14, weight: .semibold))
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     @ViewBuilder
@@ -537,8 +573,16 @@ struct MenuBarView: View {
                     }
                 }
 
-                FooterButton(title: "Quit", icon: "xmark.circle") {
-                    viewModel.quit()
+                HStack(spacing: 10) {
+                    if viewModel.accountManager.accounts.count > 1 {
+                        FooterButton(title: "Remove", icon: "minus.circle") {
+                            Task { await viewModel.removeCurrentAccount() }
+                        }
+                    }
+
+                    FooterButton(title: "Quit", icon: "xmark.circle") {
+                        viewModel.quit()
+                    }
                 }
                 .padding(.top, 4)
             } else {

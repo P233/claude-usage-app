@@ -14,6 +14,8 @@ protocol AuthenticationServiceProtocol: AnyObject {
     func getAccessToken() async throws -> String
     func refreshAndGetAccessToken() async throws -> String
     func handleSessionExpired()
+    func setOverrideTokens(_ tokens: OAuthTokens?, subscriptionType: SubscriptionType)
+    func clearOverride() async
 }
 
 // MARK: - Implementation
@@ -32,6 +34,10 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     private var cachedTokens: OAuthTokens?
     private var cachedTokensTimestamp: Date?
     private static let tokenCacheTTL: TimeInterval = 10 // seconds
+
+    /// Override tokens for multi-account: when set, getAccessToken() uses these
+    /// instead of reading from Claude Code's Keychain.
+    private var overrideTokens: OAuthTokens?
 
     init(
         oauthTokenService: OAuthTokenServiceProtocol = OAuthTokenService()
@@ -93,6 +99,15 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     /// Returns a valid access token by reading directly from Keychain.
     /// This app is a read-only consumer — it never refreshes tokens itself.
     func getAccessToken() async throws -> String {
+        // Use override tokens if set (multi-account: stored account)
+        if let tokens = overrideTokens {
+            guard !tokens.isExpired else {
+                logger.info("Override token expired")
+                throw ClaudeAPIClient.APIError.tokenExpired
+            }
+            return tokens.accessToken
+        }
+
         guard let tokens = await readTokensFromKeychain() else {
             throw ClaudeAPIClient.APIError.notAuthenticated
         }
@@ -109,6 +124,12 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
     /// Claude Code may have refreshed the token since the last read.
     /// Bypasses the token cache to ensure we get the latest from Keychain.
     func refreshAndGetAccessToken() async throws -> String {
+        // Override tokens can't be refreshed (not the Claude Code active account)
+        if overrideTokens != nil {
+            logger.info("Override account: cannot refresh token")
+            throw ClaudeAPIClient.APIError.tokenExpired
+        }
+
         logger.info("OAuth: re-reading Keychain after 401 for fresh token")
 
         guard let tokens = await readTokensFromKeychain(bypassCache: true) else {
@@ -123,11 +144,34 @@ final class AuthenticationService: ObservableObject, AuthenticationServiceProtoc
         return tokens.accessToken
     }
 
+    // MARK: - Multi-Account
+
+    /// Set override tokens for a stored account (not Claude Code's active account).
+    /// When set, getAccessToken() uses these instead of reading from Claude Code Keychain.
+    func setOverrideTokens(_ tokens: OAuthTokens?, subscriptionType: SubscriptionType) {
+        overrideTokens = tokens
+        cachedTokens = nil
+        cachedTokensTimestamp = nil
+
+        if tokens != nil {
+            authState = .authenticated(subscriptionType: subscriptionType)
+        }
+    }
+
+    /// Clear override and revert to reading from Claude Code's Keychain.
+    func clearOverride() async {
+        overrideTokens = nil
+        cachedTokens = nil
+        cachedTokensTimestamp = nil
+        await checkStoredCredentials()
+    }
+
     // MARK: - Session Management
 
     /// Called when API returns 401/403 — session expired
     func handleSessionExpired() {
         logger.warning("Session expired, clearing credentials")
+        overrideTokens = nil
         cachedTokens = nil
         cachedTokensTimestamp = nil
         authState = .notAuthenticated

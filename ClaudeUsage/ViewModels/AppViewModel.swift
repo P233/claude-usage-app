@@ -25,6 +25,7 @@ final class AppViewModel: ObservableObject {
     let refreshService: UsageRefreshServiceProtocol
     var settings: UserSettings
     let activeTasksService = ActiveTasksService()
+    let accountManager = AccountManager()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -94,7 +95,50 @@ final class AppViewModel: ObservableObject {
 
     private func checkCredentialsOnLaunch() async {
         logger.debug("App launched, checking stored credentials")
-        await authService.checkStoredCredentials()
+
+        // Always read from Claude Code Keychain first to sync accounts
+        await syncClaudeCodeAccount()
+
+        // If the active account is the Claude Code account (or no accounts), use Keychain directly
+        if let activeId = accountManager.activeAccountId,
+           !accountManager.isClaudeCodeAccount(activeId) {
+            // Active account is a stored (non-Claude-Code) account — load its tokens
+            await loadStoredAccount(activeId)
+        } else {
+            // Active account is Claude Code's current account — use Keychain directly
+            await authService.checkStoredCredentials()
+        }
+    }
+
+    /// Read from Claude Code Keychain and save/update the account in AccountManager
+    private func syncClaudeCodeAccount() async {
+        let tokenService = OAuthTokenService()
+        guard let credentials = await tokenService.loadClaudeCodeCredentials(),
+              let tokens = credentials.claudeAiOauth else { return }
+
+        let subType = SubscriptionType.from(oauthSubscriptionType: tokens.subscriptionType)
+        let subscriptionType = subType.rawValue != nil
+            ? subType
+            : SubscriptionType.from(rateLimitTier: tokens.rateLimitTier)
+
+        accountManager.syncFromClaudeCode(credentials: credentials, subscriptionType: subscriptionType)
+    }
+
+    /// Load a stored account's credentials and set override on AuthService
+    private func loadStoredAccount(_ accountId: String) async {
+        guard let account = accountManager.accounts.first(where: { $0.id == accountId }),
+              let credentials = accountManager.loadCredentials(for: accountId),
+              let tokens = credentials.claudeAiOauth else {
+            // Stored credentials invalid, fall back to Claude Code
+            logger.warning("Stored account credentials invalid, falling back to Claude Code")
+            accountManager.activeAccountId = accountManager.accounts.first(where: {
+                accountManager.isClaudeCodeAccount($0.id)
+            })?.id ?? accountManager.accounts.first?.id
+            await authService.checkStoredCredentials()
+            return
+        }
+
+        authService.setOverrideTokens(tokens, subscriptionType: account.subscriptionType)
     }
 
     private func setupBindings() {
@@ -113,7 +157,14 @@ final class AppViewModel: ObservableObject {
 
     func reconnect() async {
         logger.info("Retrying credential check")
-        await authService.checkStoredCredentials()
+        // Re-sync from Claude Code and check credentials
+        await syncClaudeCodeAccount()
+        if let activeId = accountManager.activeAccountId,
+           !accountManager.isClaudeCodeAccount(activeId) {
+            await loadStoredAccount(activeId)
+        } else {
+            await authService.checkStoredCredentials()
+        }
     }
 
     func refreshUsage() async {
@@ -130,5 +181,46 @@ final class AppViewModel: ObservableObject {
     func quit() {
         logger.info("App quitting")
         NSApplication.shared.terminate(nil)
+    }
+
+    // MARK: - Multi-Account
+
+    func switchAccount(to accountId: String) async {
+        guard accountId != accountManager.activeAccountId else { return }
+        logger.info("Switching to account: \(accountId)")
+
+        // Stop current refresh
+        refreshService.stopAutoRefresh()
+
+        // Clear current state
+        usageSummary = nil
+        extraUsage = nil
+        lastError = nil
+
+        // Set as active
+        accountManager.activeAccountId = accountId
+
+        if accountManager.isClaudeCodeAccount(accountId) {
+            // This is Claude Code's current account — clear override, use Keychain directly
+            await authService.clearOverride()
+        } else {
+            // Stored account — load override tokens
+            await loadStoredAccount(accountId)
+        }
+    }
+
+    func removeCurrentAccount() async {
+        guard let activeId = accountManager.activeAccountId else { return }
+        logger.info("Removing current account")
+
+        refreshService.stopAutoRefresh()
+        accountManager.removeAccount(activeId)
+
+        // Switch to next available account
+        if let nextId = accountManager.activeAccountId {
+            await switchAccount(to: nextId)
+        } else {
+            await authService.clearOverride()
+        }
     }
 }
