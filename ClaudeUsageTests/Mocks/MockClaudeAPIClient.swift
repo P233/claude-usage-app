@@ -40,6 +40,10 @@ final class MockClaudeAPIClient: ClaudeAPIClientProtocol {
         throw MockError.notConfigured
     }
 
+    func fetchProfile() async throws -> ProfileResponse {
+        throw MockError.notConfigured
+    }
+
     // MARK: - Test Helpers
 
     func reset() {
