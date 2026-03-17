@@ -33,4 +33,12 @@ final class MockAuthenticationService: ObservableObject, AuthenticationServicePr
     func handleSessionExpired() {
         authState = .notAuthenticated
     }
+
+    func setOverrideTokens(_ tokens: OAuthTokens?, subscriptionType: SubscriptionType) {
+        // No-op for tests
+    }
+
+    func clearOverride() async {
+        // No-op for tests
+    }
 }
