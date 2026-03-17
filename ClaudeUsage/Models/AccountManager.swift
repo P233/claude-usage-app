@@ -50,10 +50,18 @@ final class AccountManager: ObservableObject {
         accounts.first { $0.id == activeAccountId }
     }
 
-    /// The organizationUuid of the account currently logged into Claude Code CLI
-    private(set) var claudeCodeOrgUuid: String?
+    /// The organizationUuid of the account currently logged into Claude Code CLI.
+    /// Persisted so we can detect org changes across app restarts.
+    private(set) var claudeCodeOrgUuid: String? {
+        didSet {
+            UserDefaults.standard.set(claudeCodeOrgUuid, forKey: claudeCodeOrgUuidKey)
+        }
+    }
+
+    private let claudeCodeOrgUuidKey = "claudeCodeOrgUuid"
 
     init() {
+        claudeCodeOrgUuid = UserDefaults.standard.string(forKey: claudeCodeOrgUuidKey)
         loadAccounts()
     }
 
@@ -68,7 +76,28 @@ final class AccountManager: ObservableObject {
         subscriptionType: SubscriptionType,
         email: String? = nil
     ) -> AccountInfo? {
+        let previousOrgUuid = claudeCodeOrgUuid
         claudeCodeOrgUuid = orgUuid
+
+        // Detect if the active account should auto-switch to the new Claude Code account.
+        // Cases: (1) org changed and active was the old CC account,
+        //        (2) first run after update (no persisted org) and active doesn't match current CC org.
+        let shouldAutoSwitch: Bool
+        if activeAccountId == nil {
+            shouldAutoSwitch = true
+        } else if let prev = previousOrgUuid, prev != orgUuid,
+                  let activeId = activeAccountId,
+                  let activeAcct = accounts.first(where: { $0.id == activeId }),
+                  activeAcct.organizationUuid == prev {
+            shouldAutoSwitch = true
+        } else if previousOrgUuid == nil,
+                  let activeId = activeAccountId,
+                  let activeAcct = accounts.first(where: { $0.id == activeId }),
+                  activeAcct.organizationUuid != orgUuid {
+            shouldAutoSwitch = true
+        } else {
+            shouldAutoSwitch = false
+        }
 
         // Check if account already exists
         if let existingIndex = accounts.firstIndex(where: { $0.organizationUuid == orgUuid }) {
@@ -92,8 +121,7 @@ final class AccountManager: ObservableObject {
             // Update stored credentials
             saveCredentialsToKeychain(credentials, accountId: account.id)
 
-            // Set as active if no active account
-            if activeAccountId == nil {
+            if shouldAutoSwitch {
                 activeAccountId = account.id
             }
 
@@ -119,7 +147,7 @@ final class AccountManager: ObservableObject {
         accounts.append(account)
         saveCredentialsToKeychain(credentials, accountId: id)
 
-        if activeAccountId == nil {
+        if shouldAutoSwitch {
             activeAccountId = id
         }
 
