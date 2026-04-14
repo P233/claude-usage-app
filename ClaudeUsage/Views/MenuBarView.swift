@@ -90,6 +90,85 @@ struct ExtraUsageToggleButton: View {
     }
 }
 
+struct NotAuthenticatedView: View {
+    @EnvironmentObject var viewModel: AppViewModel
+
+    @State private var isRetrying = false
+    @State private var hasFailedRetry = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+
+            Text("No Credentials Found")
+                .font(.system(size: 13, weight: .medium))
+
+            VStack(spacing: 4) {
+                Text("Please ensure Claude Code CLI is installed")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text("and logged in. Run in Terminal:")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text("claude login")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Constants.Colors.cardBackground)
+                    .cornerRadius(4)
+            }
+            .multilineTextAlignment(.center)
+
+            Button {
+                guard !isRetrying else { return }
+                isRetrying = true
+                hasFailedRetry = false
+                Task {
+                    await viewModel.reconnect()
+                    isRetrying = false
+                    if case .notAuthenticated = viewModel.authState {
+                        withAnimation { hasFailedRetry = true }
+                        try? await Task.sleep(nanoseconds: 4_000_000_000)
+                        withAnimation { hasFailedRetry = false }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if isRetrying {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 10, height: 10)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10))
+                    }
+                    Text(isRetrying ? "Checking…" : "Retry")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Constants.Colors.cardBackground)
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .disabled(isRetrying)
+
+            if hasFailedRetry {
+                Text("Still no credentials — run `claude login` first, then click Retry")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.vertical, 12)
+    }
+}
+
 struct MenuBarView: View {
     @EnvironmentObject var viewModel: AppViewModel
 
@@ -111,7 +190,7 @@ struct MenuBarView: View {
         case .authenticated:
             authenticatedView
         case .notAuthenticated, .unknown:
-            notAuthenticatedView
+            NotAuthenticatedView()
         }
     }
 
@@ -438,51 +517,6 @@ struct MenuBarView: View {
         } else {
             return "in \(seconds / Constants.Time.secondsPerMinute)m"
         }
-    }
-
-    private var notAuthenticatedView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.badge.questionmark")
-                .font(.system(size: 32))
-                .foregroundColor(.secondary)
-
-            Text("No Credentials Found")
-                .font(.system(size: 13, weight: .medium))
-
-            VStack(spacing: 4) {
-                Text("Please ensure Claude Code CLI is installed")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Text("and logged in. Run in Terminal:")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Text("claude login")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Constants.Colors.cardBackground)
-                    .cornerRadius(4)
-            }
-            .multilineTextAlignment(.center)
-
-            Button {
-                Task { await viewModel.reconnect() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10))
-                    Text("Retry")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Constants.Colors.cardBackground)
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.vertical, 12)
     }
 
     // MARK: - Footer
