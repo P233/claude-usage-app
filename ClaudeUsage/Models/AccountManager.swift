@@ -1,0 +1,266 @@
+import Foundation
+import Security
+import os.log
+
+private let logger = Logger(subsystem: Constants.App.bundleIdentifier, category: "AccountManager")
+
+// MARK: - Account Info
+
+struct AccountInfo: Codable, Identifiable, Equatable {
+    let id: String
+    let organizationUuid: String
+    let subscriptionType: SubscriptionType
+    var label: String
+    var email: String?
+    let addedAt: Date
+
+    var displayName: String {
+        if let email = email, !email.isEmpty { return email }
+        if !label.isEmpty { return label }
+        return subscriptionType.displayName ?? "Account"
+    }
+
+    /// Short display for the dropdown (email prefix or label)
+    var shortDisplayName: String {
+        if let email = email, !email.isEmpty {
+            return email.components(separatedBy: "@").first ?? email
+        }
+        if !label.isEmpty { return label }
+        return subscriptionType.displayName ?? "Account"
+    }
+}
+
+// MARK: - Account Manager
+
+@MainActor
+final class AccountManager: ObservableObject {
+
+    @Published private(set) var accounts: [AccountInfo] = []
+    @Published var activeAccountId: String? {
+        didSet {
+            UserDefaults.standard.set(activeAccountId, forKey: activeAccountIdKey)
+        }
+    }
+
+    private let accountsKey = "storedAccounts_v1"
+    private let activeAccountIdKey = "activeAccountId"
+    private let keychainServiceName = "com.claudeusage.app.accounts"
+
+    var activeAccount: AccountInfo? {
+        accounts.first { $0.id == activeAccountId }
+    }
+
+    /// The organizationUuid of the account currently logged into Claude Code CLI.
+    /// Persisted so we can detect org changes across app restarts.
+    private(set) var claudeCodeOrgUuid: String? {
+        didSet {
+            UserDefaults.standard.set(claudeCodeOrgUuid, forKey: claudeCodeOrgUuidKey)
+        }
+    }
+
+    private let claudeCodeOrgUuidKey = "claudeCodeOrgUuid"
+
+    init() {
+        claudeCodeOrgUuid = UserDefaults.standard.string(forKey: claudeCodeOrgUuidKey)
+        loadAccounts()
+    }
+
+    // MARK: - Sync from Claude Code
+
+    /// Called after fetching profile + Keychain credentials.
+    /// Saves/updates the account and returns the AccountInfo.
+    @discardableResult
+    func syncFromClaudeCode(
+        credentials: ClaudeCodeCredentials,
+        organizationUuid orgUuid: String,
+        subscriptionType: SubscriptionType,
+        email: String? = nil
+    ) -> AccountInfo? {
+        let previousOrgUuid = claudeCodeOrgUuid
+        claudeCodeOrgUuid = orgUuid
+
+        // Detect if the active account should auto-switch to the new Claude Code account.
+        // Cases: (1) org changed and active was the old CC account,
+        //        (2) first run after update (no persisted org) and active doesn't match current CC org.
+        let shouldAutoSwitch: Bool
+        if activeAccountId == nil {
+            shouldAutoSwitch = true
+        } else if let prev = previousOrgUuid, prev != orgUuid,
+                  let activeId = activeAccountId,
+                  let activeAcct = accounts.first(where: { $0.id == activeId }),
+                  activeAcct.organizationUuid == prev {
+            shouldAutoSwitch = true
+        } else if previousOrgUuid == nil,
+                  let activeId = activeAccountId,
+                  let activeAcct = accounts.first(where: { $0.id == activeId }),
+                  activeAcct.organizationUuid != orgUuid {
+            shouldAutoSwitch = true
+        } else {
+            shouldAutoSwitch = false
+        }
+
+        // Check if account already exists
+        if let existingIndex = accounts.firstIndex(where: { $0.organizationUuid == orgUuid }) {
+            var account = accounts[existingIndex]
+
+            // Update subscription type or email if changed
+            let needsUpdate = account.subscriptionType != subscriptionType
+                || (email != nil && account.email != email)
+            if needsUpdate {
+                account = AccountInfo(
+                    id: account.id,
+                    organizationUuid: orgUuid,
+                    subscriptionType: subscriptionType,
+                    label: account.label,
+                    email: email ?? account.email,
+                    addedAt: account.addedAt
+                )
+                accounts[existingIndex] = account
+            }
+
+            // Update stored credentials
+            saveCredentialsToKeychain(credentials, accountId: account.id)
+
+            if shouldAutoSwitch {
+                activeAccountId = account.id
+            }
+
+            saveAccounts()
+            return account
+        }
+
+        // Create new account
+        let id = UUID().uuidString
+        let tierName = subscriptionType.displayName ?? "Account"
+        let accountNumber = accounts.count + 1
+        let label = accounts.isEmpty ? tierName : "\(tierName) \(accountNumber)"
+
+        let account = AccountInfo(
+            id: id,
+            organizationUuid: orgUuid,
+            subscriptionType: subscriptionType,
+            label: label,
+            email: email,
+            addedAt: Date()
+        )
+
+        accounts.append(account)
+        saveCredentialsToKeychain(credentials, accountId: id)
+
+        if shouldAutoSwitch {
+            activeAccountId = id
+        }
+
+        saveAccounts()
+        logger.info("Added new account: \(label)")
+        return account
+    }
+
+    /// Update the email for an account (fetched from profile API)
+    func updateEmail(for accountId: String, email: String) {
+        guard let index = accounts.firstIndex(where: { $0.id == accountId }) else { return }
+        guard accounts[index].email != email else { return }
+
+        var account = accounts[index]
+        account = AccountInfo(
+            id: account.id,
+            organizationUuid: account.organizationUuid,
+            subscriptionType: account.subscriptionType,
+            label: account.label,
+            email: email,
+            addedAt: account.addedAt
+        )
+        accounts[index] = account
+        saveAccounts()
+        logger.info("Updated email for account: \(email)")
+    }
+
+    func removeAccount(_ id: String) {
+        guard let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let account = accounts[index]
+
+        deleteCredentialsFromKeychain(accountId: account.id)
+        accounts.remove(at: index)
+
+        if activeAccountId == id {
+            activeAccountId = accounts.first?.id
+        }
+
+        saveAccounts()
+        logger.info("Removed account: \(account.displayName)")
+    }
+
+    func loadCredentials(for accountId: String) -> ClaudeCodeCredentials? {
+        loadCredentialsFromKeychain(accountId: accountId)
+    }
+
+    /// Whether the given account is the one currently logged into Claude Code CLI
+    func isClaudeCodeAccount(_ accountId: String) -> Bool {
+        guard let account = accounts.first(where: { $0.id == accountId }),
+              let ccOrgUuid = claudeCodeOrgUuid else { return false }
+        return account.organizationUuid == ccOrgUuid
+    }
+
+    // MARK: - Persistence (Account List)
+
+    private func loadAccounts() {
+        guard let data = UserDefaults.standard.data(forKey: accountsKey) else { return }
+        do {
+            accounts = try JSONDecoder().decode([AccountInfo].self, from: data)
+            activeAccountId = UserDefaults.standard.string(forKey: activeAccountIdKey) ?? accounts.first?.id
+        } catch {
+            logger.error("Failed to load accounts: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveAccounts() {
+        do {
+            let data = try JSONEncoder().encode(accounts)
+            UserDefaults.standard.set(data, forKey: accountsKey)
+        } catch {
+            logger.error("Failed to save accounts: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Keychain Storage (Per-Account Credentials)
+
+    private func saveCredentialsToKeychain(_ credentials: ClaudeCodeCredentials, accountId: String) {
+        guard let data = try? JSONEncoder().encode(credentials) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainServiceName,
+            kSecAttrAccount as String: accountId
+        ]
+        SecItemDelete(query as CFDictionary)
+
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+
+    private func loadCredentialsFromKeychain(accountId: String) -> ClaudeCodeCredentials? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainServiceName,
+            kSecAttrAccount as String: accountId,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: data)
+    }
+
+    private func deleteCredentialsFromKeychain(accountId: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainServiceName,
+            kSecAttrAccount as String: accountId
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
